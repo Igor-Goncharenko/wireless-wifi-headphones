@@ -1,69 +1,112 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "driver/ledc.h"
-#include "esp_err.h"
+#include "freertos/event_groups.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "esp_log.h"
+#include "nvs_flash.h"
 
-#define DYNAMIC_PIN GPIO_NUM_2
-#define COUNT_NOTES 39
+#include "sdkconfig.h"
 
-const int tones[COUNT_NOTES] = {
-    392, 392, 392, 311, 466, 392, 311, 466, 392,
-    587, 587, 587, 622, 466, 369, 311, 466, 392,
-    784, 392, 392, 784, 739, 698, 659, 622, 659,
-    415, 554, 523, 493, 466, 440, 466,
-    311, 369, 311, 466, 392
-};
+#define ESP_WIFI_SAE_MODE WPA3_SAE_PWE_BOTH
+#define ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD WIFI_AUTH_WPA2_PSK
 
-const int durations[COUNT_NOTES] = {
-    350, 350, 350, 250, 100, 350, 250, 100, 700,
-    350, 350, 350, 250, 100, 350, 250, 100, 700,
-    350, 250, 100, 350, 250, 100, 100, 100, 450,
-    150, 350, 250, 100, 100, 100, 450,
-    150, 350, 250, 100, 750
-};
+static const char *TAG = "wifi station";
 
-const ledc_timer_config_t ledc_timer = {
-    .speed_mode       = LEDC_LOW_SPEED_MODE,
-    .duty_resolution  = LEDC_TIMER_8_BIT,
-    .timer_num        = LEDC_TIMER_0,
-    .freq_hz          = 2000,
-    .clk_cfg          = LEDC_AUTO_CLK
-};
+#define WIFI_CONNECTED_BIT BIT0
+#define WIFI_FAIL_BIT      BIT1
+static EventGroupHandle_t s_wifi_event_group;
 
-const ledc_channel_config_t ledc_channel = {
-    .speed_mode     = LEDC_LOW_SPEED_MODE,
-    .channel        = LEDC_CHANNEL_0,
-    .timer_sel      = LEDC_TIMER_0,
-    .intr_type      = LEDC_INTR_DISABLE,
-    .gpio_num       = DYNAMIC_PIN,
-    .duty           = 0,
-    .hpoint         = 0
-};
+static int s_retry_num = 0;
 
-void app_main(void) {
-    ESP_ERROR_CHECK(ledc_timer_config(&ledc_timer));
-    ESP_ERROR_CHECK(ledc_channel_config(&ledc_channel));
-    
-    ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 128));
-    ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0));
-
-    while (1) {
-        for (int i = 0; i < COUNT_NOTES; i++) {
-            if (tones[i] > 0) {
-                ESP_ERROR_CHECK(ledc_set_freq(LEDC_LOW_SPEED_MODE, LEDC_TIMER_0, tones[i]));
-                
-                ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 128));
-                ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0));
-                
-                vTaskDelay(pdMS_TO_TICKS(durations[i]));
-                
-                ESP_ERROR_CHECK(ledc_set_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0, 0));
-                ESP_ERROR_CHECK(ledc_update_duty(LEDC_LOW_SPEED_MODE, LEDC_CHANNEL_0));
-            }
-            
-            vTaskDelay(pdMS_TO_TICKS(10));
+static void event_handler(void* arg, esp_event_base_t event_base,
+                                int32_t event_id, void* event_data)
+{
+    if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
+        esp_wifi_connect();
+    } else if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_DISCONNECTED) {
+        if (s_retry_num < CONFIG_WIFI_MAXIMUM_RETRY) {
+            esp_wifi_connect();
+            s_retry_num++;
+            ESP_LOGW(TAG, "retry to connect to the AP %d/%d", s_retry_num, CONFIG_WIFI_MAXIMUM_RETRY);
+        } else {
+            xEventGroupSetBits(s_wifi_event_group, WIFI_FAIL_BIT);
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        ESP_LOGI(TAG,"connect to the AP fail");
+    } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
+        ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
+        s_retry_num = 0;
+        xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
     }
+}
+
+void wifi_init_sta(void)
+{
+    s_wifi_event_group = xEventGroupCreate();
+
+    ESP_ERROR_CHECK(esp_netif_init());
+
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+    esp_netif_create_default_wifi_sta();
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    esp_event_handler_instance_t instance_any_id;
+    esp_event_handler_instance_t instance_got_ip;
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                        ESP_EVENT_ANY_ID,
+                                                        &event_handler,
+                                                        NULL,
+                                                        &instance_any_id));
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(IP_EVENT,
+                                                        IP_EVENT_STA_GOT_IP,
+                                                        &event_handler,
+                                                        NULL,
+                                                        &instance_got_ip));
+
+    wifi_config_t wifi_config = {
+        .sta = {
+            .ssid = CONFIG_WIFI_SSID,
+            .password = CONFIG_WIFI_PASSWORD,
+            .threshold.authmode = ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD,
+            .sae_pwe_h2e = ESP_WIFI_SAE_MODE,
+            .sae_h2e_identifier = CONFIG_WIFI_PW_ID,
+        },
+    };
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_STA));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_STA, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_LOGI(TAG, "wifi_init_sta finished.");
+
+    EventBits_t bits = xEventGroupWaitBits(s_wifi_event_group,
+            WIFI_CONNECTED_BIT | WIFI_FAIL_BIT,
+            pdFALSE,
+            pdFALSE,
+            portMAX_DELAY);
+
+    if (bits & WIFI_CONNECTED_BIT) {
+        ESP_LOGI(TAG, "connected to ap SSID:%s password:%s",
+                 CONFIG_WIFI_SSID, CONFIG_WIFI_PASSWORD);
+    } else if (bits & WIFI_FAIL_BIT) {
+        ESP_LOGI(TAG, "Failed to connect to SSID:%s, password:%s",
+                 CONFIG_WIFI_SSID, CONFIG_WIFI_PASSWORD);
+    } else {
+        ESP_LOGE(TAG, "UNEXPECTED EVENT");
+    }
+}
+
+void app_main(void)
+{
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+      ESP_ERROR_CHECK(nvs_flash_erase());
+      ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
+    wifi_init_sta();
 }

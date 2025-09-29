@@ -6,7 +6,12 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 
+#include "lwip/sockets.h"
+
 #include "sdkconfig.h"
+
+#define UDP_PORT 1234
+#define AUDIO_BUFFER_SIZE 1024
 
 #define ESP_WIFI_SAE_MODE WPA3_SAE_PWE_BOTH
 #define ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD WIFI_AUTH_WPA2_PSK
@@ -16,6 +21,8 @@ static const char *TAG = "wifi station";
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 static EventGroupHandle_t s_wifi_event_group;
+
+static TaskHandle_t s_udp_recv_task = NULL;
 
 static int s_retry_num = 0;
 
@@ -98,6 +105,51 @@ void wifi_init_sta(void)
     }
 }
 
+void udp_audio_receiver_task(void *params) {
+    char rx_buffer[AUDIO_BUFFER_SIZE];
+    struct sockaddr_in dest_addr;
+    struct sockaddr_in source_addr;
+    socklen_t socklen = sizeof(source_addr);
+    
+    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
+    if (sock < 0) {
+        ESP_LOGE(TAG, "Unable to create socket");
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    dest_addr.sin_family = AF_INET;
+    dest_addr.sin_port = htons(UDP_PORT);
+    
+    int err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
+    if (err != 0) {
+        ESP_LOGE(TAG, "Socket bind failed");
+        close(sock);
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    ESP_LOGI(TAG, "UDP receiver started on port %d", UDP_PORT);
+    
+    while (1) {
+        int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0,
+                          (struct sockaddr *)&source_addr, &socklen);
+        
+        if (len > 0) {
+            rx_buffer[len] = 0;
+            ESP_LOGI(TAG, "Received %d bytes", len);
+            
+            // process_audio_data((uint8_t*)rx_buffer, len);
+        }
+        
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+    
+    close(sock);
+    vTaskDelete(NULL);
+}
+
 void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -109,4 +161,6 @@ void app_main(void)
 
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     wifi_init_sta();
+
+    xTaskCreate(udp_audio_receiver_task, "UDP recv", 4096, NULL, 5, &s_udp_recv_task);
 }

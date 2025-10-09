@@ -176,9 +176,21 @@ int audio_init(pulse_audio_t *pulse) {
 }
 
 void audio_destroy(pulse_audio_t *pulse) {
-    if (pulse->stream) pa_stream_unref(pulse->stream);
+    if (pulse->stream) {
+        pa_stream_disconnect(pulse->stream);
+        pa_stream_unref(pulse->stream);
+        pulse->stream = NULL;
+    }
     remove_virtual_sink(pulse);
-    if (pulse->context) pa_context_unref(pulse->context);
-    if (pulse->mainloop) pa_threaded_mainloop_free(pulse->mainloop);
-    
+
+    if (pulse->context) {
+        pa_context_disconnect(pulse->context);
+        pa_context_unref(pulse->context);
+        pulse->context = NULL;
+    }
+    if (pulse->mainloop) {
+        pa_threaded_mainloop_stop(pulse->mainloop);
+        pa_threaded_mainloop_free(pulse->mainloop);
+        pulse->mainloop = NULL;
+    }
 }

@@ -1,3 +1,5 @@
+#include "audio.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
@@ -11,14 +13,6 @@
 #define DEVICE_NAME "WifiHeadphones"
 #define DEVICE_DESC "WiFi-Headphones"
 #define STREAM_NAME DEVICE_NAME "Monitor"
-
-typedef struct {
-    pa_threaded_mainloop *mainloop;
-    pa_context *context;
-    pa_stream *stream;
-    uint32_t module_idx;
-    int module_loaded;
-} pulse_audio_t;
 
 static void stream_read_cb(pa_stream *s, size_t length, void *userdata) {
     //pulse_audio_t *pulse = (pulse_audio_t*) userdata;
@@ -47,28 +41,6 @@ static void stream_state_cb(pa_stream *s, void *userdata) {
 
 }
 
-int pulse_audio_init(pulse_audio_t *pulse) {
-    pulse->mainloop = pa_threaded_mainloop_new();
-    pa_mainloop_api *api = pa_threaded_mainloop_get_api(pulse->mainloop);
-    
-    pulse->context = pa_context_new(api, CONTEXT_NAME);
-    pa_context_set_state_callback(pulse->context, context_state_cb, pulse);
-    
-    if (pa_context_connect(pulse->context, NULL, 0, NULL) < 0) {
-        return -1;
-    }
-    
-    pa_threaded_mainloop_lock(pulse->mainloop);
-    pa_threaded_mainloop_start(pulse->mainloop);
-    
-    while (pa_context_get_state(pulse->context) != PA_CONTEXT_READY) {
-        pa_threaded_mainloop_wait(pulse->mainloop);
-    }
-    
-    pa_threaded_mainloop_unlock(pulse->mainloop);
-    return 0;
-}
-
 static void load_module_cb(pa_context *c, uint32_t idx, void *userdata) {
     pulse_audio_t *pulse = (pulse_audio_t*) userdata;
 
@@ -84,7 +56,7 @@ static void load_module_cb(pa_context *c, uint32_t idx, void *userdata) {
     pa_threaded_mainloop_signal(pulse->mainloop, 0);
 }
 
-int create_virtual_sink(pulse_audio_t *pulse) {
+static int create_virtual_sink(pulse_audio_t *pulse) {
     pa_threaded_mainloop_lock(pulse->mainloop);
 
     pulse->module_loaded = 0;
@@ -119,7 +91,7 @@ int create_virtual_sink(pulse_audio_t *pulse) {
     return 0;
 }
 
-void remove_virtual_sink(pulse_audio_t *pulse) {
+static void remove_virtual_sink(pulse_audio_t *pulse) {
     if (pulse->module_loaded) {
         pa_threaded_mainloop_lock(pulse->mainloop);
 
@@ -135,7 +107,7 @@ void remove_virtual_sink(pulse_audio_t *pulse) {
     }
 }
 
-int create_monitor_stream(pulse_audio_t *pulse) {
+static int create_monitor_stream(pulse_audio_t *pulse) {
     pa_sample_spec sample_spec = {
         .format = PA_SAMPLE_S16LE,
         .rate = 44100,
@@ -156,22 +128,42 @@ int create_monitor_stream(pulse_audio_t *pulse) {
     return 0;
 }
 
-int main() {
-    pulse_audio_t pulse = {0};
+static int pulse_audio_init(pulse_audio_t *pulse) {
+    pulse->mainloop = pa_threaded_mainloop_new();
+    pa_mainloop_api *api = pa_threaded_mainloop_get_api(pulse->mainloop);
     
-    if (pulse_audio_init(&pulse) != 0) {
+    pulse->context = pa_context_new(api, CONTEXT_NAME);
+    pa_context_set_state_callback(pulse->context, context_state_cb, pulse);
+    
+    if (pa_context_connect(pulse->context, NULL, 0, NULL) < 0) {
+        return -1;
+    }
+    
+    pa_threaded_mainloop_lock(pulse->mainloop);
+    pa_threaded_mainloop_start(pulse->mainloop);
+    
+    while (pa_context_get_state(pulse->context) != PA_CONTEXT_READY) {
+        pa_threaded_mainloop_wait(pulse->mainloop);
+    }
+    
+    pa_threaded_mainloop_unlock(pulse->mainloop);
+    return 0;
+}
+
+int audio_init(pulse_audio_t *pulse) {
+    if (pulse_audio_init(pulse) != 0) {
         printf("Failed to init PulseAudio\n");
-        return EXIT_FAILURE;
+        return -1;
     }
     
-    if (create_virtual_sink(&pulse) != 0) {
+    if (create_virtual_sink(pulse) != 0) {
         printf("Failed to create virtual sink\n");
-        return EXIT_FAILURE;
+        return -1;
     }
     
-    if (create_monitor_stream(&pulse) != 0) {
+    if (create_monitor_stream(pulse) != 0) {
         printf("Failed to create monitor stream\n");
-        return EXIT_FAILURE;
+        return -1;
     }
     
     printf("Virtual output device created via PulseAudio API!\n");
@@ -180,10 +172,13 @@ int main() {
     
     getchar();
     
-    if (pulse.stream) pa_stream_unref(pulse.stream);
-    remove_virtual_sink(&pulse);
-    if (pulse.context) pa_context_unref(pulse.context);
-    if (pulse.mainloop) pa_threaded_mainloop_free(pulse.mainloop);
+    return 0;
+}
+
+void audio_destroy(pulse_audio_t *pulse) {
+    if (pulse->stream) pa_stream_unref(pulse->stream);
+    remove_virtual_sink(pulse);
+    if (pulse->context) pa_context_unref(pulse->context);
+    if (pulse->mainloop) pa_threaded_mainloop_free(pulse->mainloop);
     
-    return EXIT_SUCCESS;
 }

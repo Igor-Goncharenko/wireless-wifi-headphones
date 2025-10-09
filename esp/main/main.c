@@ -1,6 +1,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "esp_mac.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -22,9 +23,21 @@ static const char *TAG = "wifi station";
 #define WIFI_FAIL_BIT      BIT1
 static EventGroupHandle_t s_wifi_event_group;
 
-static TaskHandle_t s_udp_recv_task = NULL;
+#define MULTICAST_GROUP "224.1.1.1"
+#define DISCOVERY_PORT 5000
+#define DISCOVERY_REQUEST "DISCOVER_HEADPHONES_REQUEST"
+
+//static TaskHandle_t s_udp_recv_task = NULL;
 
 static int s_retry_num = 0;
+
+typedef struct {
+    char model[32];
+    char device_id[32];
+    char ip_addr[16];
+} device_info_t;
+
+static device_info_t device_info;
 
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
@@ -104,7 +117,7 @@ void wifi_init_sta(void)
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
 }
-
+/*
 void udp_audio_receiver_task(void *params) {
     char rx_buffer[AUDIO_BUFFER_SIZE];
     struct sockaddr_in dest_addr;
@@ -149,6 +162,104 @@ void udp_audio_receiver_task(void *params) {
     close(sock);
     vTaskDelete(NULL);
 }
+*/
+
+static void init_device_info(void)
+{
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    
+    snprintf(device_info.device_id, sizeof(device_info.device_id),
+             "%02X:%02X:%02X:%02X:%02X:%02X",
+             mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+    
+    strlcpy(device_info.model, "WiFi Headphones v1.0", sizeof(device_info.model));
+    strlcpy(device_info.ip_addr, "0.0.0.0", sizeof(device_info.ip_addr));
+    
+    ESP_LOGI(TAG, "Device ID: %s", device_info.device_id);
+    ESP_LOGI(TAG, "Model: %s", device_info.model);
+}
+
+static int create_discovery_response(char *buffer, size_t buffer_size)
+{
+    return snprintf(buffer, buffer_size,
+                   "{\"type\":\"HEADPHONES_RESPONSE\","
+                   "\"model\":\"%s\","
+                   "\"id\":\"%s\","
+                   "\"ip\":\"%s\"}",
+                   device_info.model, device_info.device_id, device_info.ip_addr);
+}
+
+static void discovery_server_task(void *pvParameters)
+{
+    int sockfd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    char buffer[128];
+    char response[256];
+    int recv_len;
+    
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        ESP_LOGE(TAG, "Failed to create socket");
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_addr.sin_port = htons(DISCOVERY_PORT);
+    
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        ESP_LOGE(TAG, "Bind failed");
+        close(sockfd);
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    struct ip_mreq mreq;
+    mreq.imr_multiaddr.s_addr = inet_addr(MULTICAST_GROUP);
+    mreq.imr_interface.s_addr = htonl(INADDR_ANY);
+    
+    if (setsockopt(sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
+        ESP_LOGE(TAG, "Multicast group join failed");
+        close(sockfd);
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    ESP_LOGI(TAG, "Discovery server started on port %d", DISCOVERY_PORT);
+    
+    while (1) {
+        recv_len = recvfrom(sockfd, buffer, sizeof(buffer) - 1, 0,
+                           (struct sockaddr *)&client_addr, &client_len);
+        
+        if (recv_len > 0) {
+            buffer[recv_len] = '\0';
+            //ESP_LOGI(TAG, "Received: %s from " IPSTR, buffer, 
+            //         IP2STR(&client_addr.sin_addr.s_addr));
+            
+            if (strcmp(buffer, DISCOVERY_REQUEST) == 0) {
+                int response_len = create_discovery_response(response, sizeof(response));
+               
+                if (sendto(sockfd, response, response_len, 0,
+                          (struct sockaddr *)&client_addr, client_len) < 0) {
+                    ESP_LOGE(TAG, "Failed to send response");
+                } else {
+                    //ESP_LOGI(TAG, "Discovery response sent to " IPSTR, 
+                    //         IP2STR(&client_addr.sin_addr.s_addr));
+                }
+            }
+        } else if (recv_len < 0) {
+            ESP_LOGE(TAG, "recvfrom failed: errno %d", errno);
+        }
+        
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+    
+    close(sockfd);
+    vTaskDelete(NULL);
+}
 
 void app_main(void)
 {
@@ -162,5 +273,11 @@ void app_main(void)
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     wifi_init_sta();
 
-    xTaskCreate(udp_audio_receiver_task, "UDP recv", 4096, NULL, 5, &s_udp_recv_task);
+    vTaskDelay(pdMS_TO_TICKS(5000));
+
+    init_device_info();
+    
+    xTaskCreate(discovery_server_task, "discovery_server", 4096, NULL, 5, NULL);
+
+    //xTaskCreate(udp_audio_receiver_task, "UDP recv", 4096, NULL, 5, &s_udp_recv_task);
 }

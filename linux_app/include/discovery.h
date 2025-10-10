@@ -15,7 +15,7 @@ typedef struct {
     char type[32];
     char model[64];
     char id[32];
-    char ip[16];
+    char ip_v4[16];
 } headphone_response_t;
 
 int discovery_server_init(discovery_server_t *server);

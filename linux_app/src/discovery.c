@@ -105,12 +105,7 @@ int discover_headphones(const discovery_server_t *server, headphone_response_t *
                 sscanf(type, "\"type\":\"%31[^\"]", devices[device_count].type);
                 sscanf(model, "\"model\":\"%63[^\"]", devices[device_count].model);
                 sscanf(id, "\"id\":\"%31[^\"]", devices[device_count].id);
-                sscanf(ip, "\"ip\":\"%15[^\"]", devices[device_count].ip);
-                
-                printf("Found headphones: %s at %s (ID: %s)\n",
-                       devices[device_count].model,
-                       devices[device_count].ip,
-                       devices[device_count].id);
+                sscanf(ip, "\"ip\":\"%15[^\"]", devices[device_count].ip_v4);
                 
                 device_count++;
                 

@@ -10,6 +10,7 @@
 #include "lwip/sockets.h"
 
 #include "sdkconfig.h"
+#include <stdio.h>
 
 #define UDP_PORT 1234
 #define AUDIO_BUFFER_SIZE 1024
@@ -38,6 +39,7 @@ typedef struct {
 } device_info_t;
 
 static device_info_t device_info;
+static esp_ip4_addr_t ip4;
 
 static void event_handler(void* arg, esp_event_base_t event_base,
                                 int32_t event_id, void* event_data)
@@ -55,6 +57,7 @@ static void event_handler(void* arg, esp_event_base_t event_base,
         ESP_LOGI(TAG,"connect to the AP fail");
     } else if (event_base == IP_EVENT && event_id == IP_EVENT_STA_GOT_IP) {
         ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
+        ip4 = event->ip_info.ip;
         ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
         s_retry_num = 0;
         xEventGroupSetBits(s_wifi_event_group, WIFI_CONNECTED_BIT);
@@ -174,7 +177,7 @@ static void init_device_info(void)
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
     
     strlcpy(device_info.model, "WiFi Headphones v1.0", sizeof(device_info.model));
-    strlcpy(device_info.ip_addr, "0.0.0.0", sizeof(device_info.ip_addr));
+    sprintf(device_info.ip_addr, IPSTR, IP2STR(&ip4)); 
     
     ESP_LOGI(TAG, "Device ID: %s", device_info.device_id);
     ESP_LOGI(TAG, "Model: %s", device_info.model);

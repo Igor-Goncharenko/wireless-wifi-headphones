@@ -21,8 +21,17 @@ int main(void) {
     int cnt = discover_headphones(&server, hps, 16);
 
     for (int i = 0; i < cnt; i++) {
-        printf("%s %s %s %s\n", hps[i].type, hps[i].model, hps[i].id, hps[i].ip);
+        printf("%d) %s %s %s %s\n", i + 1, hps[i].type, hps[i].model, hps[i].id, hps[i].ip_v4);
     }
+
+    int idx;
+    do {
+    printf("Choose headphones to connect: \n> ");
+    } while (scanf("%d", &idx) != 1 || idx < 1 || idx > cnt);
+
+    idx--;
+
+    printf("Connecting to %s %s %s %s\n", hps[idx].type, hps[idx].model, hps[idx].id, hps[idx].ip_v4);
 
     return EXIT_SUCCESS;
 }

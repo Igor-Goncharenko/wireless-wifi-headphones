@@ -1,4 +1,4 @@
-#include "wifi.h"
+#include "discovery.h"
 
 #include <stdio.h>
 #include <time.h>

@@ -1,7 +1,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 //#include "audio.h"
-#include "wifi.h"
+#include "discovery.h"
 
 int main(void) {
     //pulse_audio_t pulse = { 0 };

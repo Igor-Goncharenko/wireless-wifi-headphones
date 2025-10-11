@@ -2,8 +2,9 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-//#include "audio.h"
+#include "audio.h"
 #include "discovery.h"
+#include "rtp_client.h"
 
 int main(void) {
     discovery_server_t server = { 0 };
@@ -32,6 +33,24 @@ int main(void) {
         idx--;
 
         printf("Connecting to %s %s %s %s\n", hps[idx].type, hps[idx].model, hps[idx].id, hps[idx].ip_v4);
+
+        rtp_session_t session = { 0 };
+        pulse_audio_t pulse = { 0 };
+
+        if (rtp_session_create(&session, hps[idx].ip_v4, RTP_PORT) != 0) {
+            fprintf(stderr, "Failed to init rtp session\n");
+            discovery_server_destroy(&server);
+            return EXIT_FAILURE;
+        }
+
+        if (audio_init(&pulse, &session) != 0) {
+            fprintf(stderr, "Failed to init audio\n");
+            audio_destroy(&pulse);
+            discovery_server_destroy(&server);
+            return EXIT_FAILURE;
+        }
+
+        audio_destroy(&pulse);
     }
     else {
         printf("Nothing found\n");

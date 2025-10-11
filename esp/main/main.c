@@ -10,7 +10,8 @@
 #include "lwip/sockets.h"
 
 #include "sdkconfig.h"
-#include <stdio.h>
+
+#include <inttypes.h>
 
 #define UDP_PORT 1234
 #define AUDIO_BUFFER_SIZE 1024
@@ -28,7 +29,13 @@ static EventGroupHandle_t s_wifi_event_group;
 #define DISCOVERY_PORT 5000
 #define DISCOVERY_REQUEST "DISCOVER_HEADPHONES_REQUEST"
 
-//static TaskHandle_t s_udp_recv_task = NULL;
+#define RTP_PORT 5002
+#define RTP_PAYLOAD_TYPE 96
+#define AUDIO_SAMPLE_RATE 44100
+#define CHANNELS 2
+#define SAMPLE_SIZE 2
+#define FRAMES_PER_PACKET 256
+#define I2S_NUM I2S_NUM_0
 
 static int s_retry_num = 0;
 
@@ -37,6 +44,25 @@ typedef struct {
     char device_id[32];
     char ip_addr[16];
 } device_info_t;
+
+#pragma pack(push, 1)
+typedef struct {
+    // first byte
+    uint8_t contributor_count : 4;
+    uint8_t ver : 2;
+    uint8_t p : 1;
+    uint8_t x : 1;
+
+    // second byte
+    uint8_t payload_types : 7;
+    uint8_t m : 1;
+
+    // other
+    uint16_t sequence;
+    uint32_t timestamp;
+    uint32_t ssrc;
+} rtp_header_t;
+#pragma pack(pop)
 
 static device_info_t device_info;
 static esp_ip4_addr_t ip4;
@@ -120,52 +146,6 @@ void wifi_init_sta(void)
         ESP_LOGE(TAG, "UNEXPECTED EVENT");
     }
 }
-/*
-void udp_audio_receiver_task(void *params) {
-    char rx_buffer[AUDIO_BUFFER_SIZE];
-    struct sockaddr_in dest_addr;
-    struct sockaddr_in source_addr;
-    socklen_t socklen = sizeof(source_addr);
-    
-    int sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (sock < 0) {
-        ESP_LOGE(TAG, "Unable to create socket");
-        vTaskDelete(NULL);
-        return;
-    }
-    
-    dest_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    dest_addr.sin_family = AF_INET;
-    dest_addr.sin_port = htons(UDP_PORT);
-    
-    int err = bind(sock, (struct sockaddr *)&dest_addr, sizeof(dest_addr));
-    if (err != 0) {
-        ESP_LOGE(TAG, "Socket bind failed");
-        close(sock);
-        vTaskDelete(NULL);
-        return;
-    }
-    
-    ESP_LOGI(TAG, "UDP receiver started on port %d", UDP_PORT);
-    
-    while (1) {
-        int len = recvfrom(sock, rx_buffer, sizeof(rx_buffer) - 1, 0,
-                          (struct sockaddr *)&source_addr, &socklen);
-        
-        if (len > 0) {
-            rx_buffer[len] = 0;
-            ESP_LOGI(TAG, "Received %d bytes", len);
-            
-            // process_audio_data((uint8_t*)rx_buffer, len);
-        }
-        
-        vTaskDelay(10 / portTICK_PERIOD_MS);
-    }
-    
-    close(sock);
-    vTaskDelete(NULL);
-}
-*/
 
 static void init_device_info(void)
 {
@@ -264,6 +244,88 @@ static void discovery_server_task(void *pvParameters)
     vTaskDelete(NULL);
 }
 
+static void rtp_receiver_task(void *args) {
+    int sockfd;
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    uint8_t buffer[1500];
+    int recv_len;
+    
+    uint16_t expected_sequence = 0;
+    uint32_t packets_received = 0;
+    uint32_t packets_lost = 0;
+    
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        ESP_LOGE(TAG, "Failed to create socket");
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+    server_addr.sin_port = htons(RTP_PORT);
+    
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        ESP_LOGE(TAG, "Bind failed");
+        close(sockfd);
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    ESP_LOGI(TAG, "RTP server started on port %d", RTP_PORT);
+    
+    while (1) {
+        recv_len = recvfrom(sockfd, buffer, sizeof(buffer), 0,
+                           (struct sockaddr *)&client_addr, &client_len);
+        
+        if (recv_len > (int)sizeof(rtp_header_t)) {
+            rtp_header_t* header = (rtp_header_t*)buffer;
+            
+            if (header->ver != 2) {
+                ESP_LOGW(TAG, "Invalid RTP version");
+                continue;
+            }
+            
+            if (header->payload_types != RTP_PAYLOAD_TYPE) {
+                ESP_LOGW(TAG, "Unexpected payload type: %d", header->payload_types);
+                continue;
+            }
+            
+            uint16_t sequence = ntohs(header->sequence);
+            
+            // check packet loss
+            if (expected_sequence != 0 && sequence != expected_sequence) {
+                packets_lost += (sequence - expected_sequence);
+                ESP_LOGI(TAG, "Packet loss detected: expected %d, got %d", 
+                         expected_sequence, sequence);
+            }
+            expected_sequence = sequence + 1;
+            
+            size_t audio_data_size = recv_len - sizeof(rtp_header_t);
+            //uint8_t* audio_data = buffer + sizeof(rtp_header_t);
+            
+            // send data to i2s
+            //size_t bytes_written;
+            //i2s_write(I2S_NUM, audio_data, audio_data_size, &bytes_written, portMAX_DELAY);
+            
+            packets_received++;
+
+            ESP_LOGI(TAG, "Audio data got : %u; packets received : %" PRIu32, audio_data_size);
+            
+            if (packets_received % 100 == 0) {
+                ESP_LOGI(TAG, "Received %lu packets, lost: %lu", 
+                         packets_received, packets_lost);
+            }
+        }
+        
+        vTaskDelay(1 / portTICK_PERIOD_MS);
+    }
+    
+    close(sockfd);
+    vTaskDelete(NULL);
+}
+
 void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -282,5 +344,5 @@ void app_main(void)
     
     xTaskCreate(discovery_server_task, "discovery_server", 4096, NULL, 5, NULL);
 
-    //xTaskCreate(udp_audio_receiver_task, "UDP recv", 4096, NULL, 5, &s_udp_recv_task);
+    xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, NULL, 5, NULL);
 }

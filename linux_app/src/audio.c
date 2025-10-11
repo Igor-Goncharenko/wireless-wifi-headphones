@@ -9,20 +9,30 @@
 #include <pulse/thread-mainloop.h>
 #include <pulse/volume.h>
 
+#include "rtp_client.h"
+
 #define CONTEXT_NAME "WiFi Headphones Output"
 #define DEVICE_NAME "WifiHeadphones"
 #define DEVICE_DESC "WiFi-Headphones"
 #define STREAM_NAME DEVICE_NAME "Monitor"
 
 static void stream_read_cb(pa_stream *s, size_t length, void *userdata) {
-    //pulse_audio_t *pulse = (pulse_audio_t*) userdata;
+    pulse_audio_t *pulse = (pulse_audio_t*) userdata;
     const void *data;
 
     if (pa_stream_peek(s, &data, &length) < 0) return;
 
     if (data != NULL && length > 0) {
         printf("Audio captured: %zu bytes \n", length);
-        // here send to wifi
+
+        int marker = (pulse->packet_count % 100 == 0);  // Marker every 100 packets
+        int packets;
+        if ((packets = rtp_send_packet(pulse->session, data, length, marker)) != 0) {
+            pulse->packet_count += packets;
+            if (pulse->packet_count % 100 == 0) {
+                printf("Sent %d packets\n", pulse->packet_count);
+            }
+        }
     }
 
     pa_stream_drop(s);
@@ -150,7 +160,9 @@ static int pulse_audio_init(pulse_audio_t *pulse) {
     return 0;
 }
 
-int audio_init(pulse_audio_t *pulse) {
+int audio_init(pulse_audio_t *pulse, rtp_session_t *session) {
+    pulse->session = session;
+
     if (pulse_audio_init(pulse) != 0) {
         printf("Failed to init PulseAudio\n");
         return -1;
@@ -170,7 +182,8 @@ int audio_init(pulse_audio_t *pulse) {
     printf("Check: pactl list sinks short | grep Wifi\n");
     printf("Press Enter to stop...\n");
     
-    getchar();
+    char buf[4];
+    scanf("%s", buf);
     
     return 0;
 }

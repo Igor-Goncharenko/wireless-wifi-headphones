@@ -29,8 +29,15 @@ int rtp_session_create(rtp_session_t *session, const char *server_ip, const int 
     return 0;
 }
 
-static size_t rtp_send_packet_small(rtp_session_t *session, const uint8_t *data, 
-                                    const size_t data_size, const int marker) {
+void rtp_session_destroy(rtp_session_t *session) {
+    if (session->sockfd > 0) {
+        close(session->sockfd);
+        session->sockfd = -1;
+    }
+}
+
+static ssize_t rtp_send_packet_small(rtp_session_t *session, const uint8_t *data, 
+                                     const size_t data_size, const int marker) {
     uint8_t packet[MAX_PACKET_SIZE];
     rtp_header_t *header = (rtp_header_t*) packet;
 
@@ -56,8 +63,8 @@ static size_t rtp_send_packet_small(rtp_session_t *session, const uint8_t *data,
     return sent;
 }
 
-size_t rtp_send_packet(rtp_session_t *session, const uint8_t *data, 
-                       const size_t data_size, const int marker) {
+ssize_t rtp_send_packet(rtp_session_t *session, const uint8_t *data, 
+                        const size_t data_size, const int marker) {
     if (data_size <= MAX_PACKET_SIZE) {
         return (rtp_send_packet_small(session, data, data_size, marker) != 0) ? 1 : 0;
     }
@@ -68,18 +75,16 @@ size_t rtp_send_packet(rtp_session_t *session, const uint8_t *data,
     int packet_count = 0;
 
     while (remaining > 0) {
-        size_t fragment_size = (remaining > MAX_PACKET_SIZE) ? 
-                              MAX_PACKET_SIZE: remaining;
+        ssize_t fragment_size = (remaining > MAX_PACKET_SIZE) ?
+                                MAX_PACKET_SIZE : remaining;
         
-        int fragment_marker = (remaining == fragment_size) ? marker : 0;
+        const int fragment_marker = (remaining == fragment_size) ? marker : 0;
         
-        ssize_t sent = rtp_send_packet_small(session, current_pos, fragment_size, fragment_marker);
+        const ssize_t sent = rtp_send_packet_small(session, current_pos, fragment_size, fragment_marker);
         
-        if (sent <= 0) {
-            return (total_sent > 0) ? total_sent : -1;
-        }
+        if (sent <= 0) return (total_sent > 0) ? total_sent : -1;
         
-        size_t payload_sent = sent - sizeof(rtp_header_t);
+        const ssize_t payload_sent = sent - sizeof(rtp_header_t);
         total_sent += payload_sent;
         current_pos += payload_sent;
         remaining -= payload_sent;

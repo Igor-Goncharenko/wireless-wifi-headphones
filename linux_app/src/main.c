@@ -6,6 +6,26 @@
 #include "discovery.h"
 #include "rtp_client.h"
 
+int connect_to_wifi_hp(const char *ip4) {
+    rtp_session_t session = { 0 };
+    pulse_audio_t pulse = { 0 };
+
+    if (rtp_session_create(&session, ip4, RTP_PORT) != 0) {
+        fprintf(stderr, "Failed to init rtp session\n");
+        return -1;
+    }
+
+    if (audio_init(&pulse, &session) != 0) {
+        fprintf(stderr, "Failed to init audio\n");
+        audio_destroy(&pulse);
+        return -1;
+    }
+
+    rtp_session_destroy(&session);
+
+    return 0;
+}
+
 int main(void) {
     discovery_server_t server = { 0 };
 
@@ -34,23 +54,11 @@ int main(void) {
 
         printf("Connecting to %s %s %s %s\n", hps[idx].type, hps[idx].model, hps[idx].id, hps[idx].ip_v4);
 
-        rtp_session_t session = { 0 };
-        pulse_audio_t pulse = { 0 };
-
-        if (rtp_session_create(&session, hps[idx].ip_v4, RTP_PORT) != 0) {
-            fprintf(stderr, "Failed to init rtp session\n");
+        if (connect_to_wifi_hp(hps[idx].ip_v4) != 0) {
+            printf("Failed to connect to wifi headphones\n");
             discovery_server_destroy(&server);
             return EXIT_FAILURE;
         }
-
-        if (audio_init(&pulse, &session) != 0) {
-            fprintf(stderr, "Failed to init audio\n");
-            audio_destroy(&pulse);
-            discovery_server_destroy(&server);
-            return EXIT_FAILURE;
-        }
-
-        audio_destroy(&pulse);
     }
     else {
         printf("Nothing found\n");

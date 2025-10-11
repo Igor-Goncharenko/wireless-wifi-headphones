@@ -19,19 +19,18 @@
 static void stream_read_cb(pa_stream *s, size_t length, void *userdata) {
     pulse_audio_t *pulse = (pulse_audio_t*) userdata;
     const void *data;
+    int packets;
 
     if (pa_stream_peek(s, &data, &length) < 0) return;
 
     if (data != NULL && length > 0) {
         printf("Audio captured: %zu bytes \n", length);
 
-        int marker = (pulse->packet_count % 100 == 0);  // Marker every 100 packets
-        int packets;
-        if ((packets = rtp_send_packet(pulse->session, data, length, marker)) != 0) {
-            pulse->packet_count += packets;
-            if (pulse->packet_count % 100 == 0) {
-                printf("Sent %d packets\n", pulse->packet_count);
-            }
+        if ((packets = rtp_send_packet(pulse->session, data, length, 0)) > 0) {
+            printf("Sent %d packets\n", packets);
+        }
+        else {
+            printf("Failed to sent packets\n");
         }
     }
 

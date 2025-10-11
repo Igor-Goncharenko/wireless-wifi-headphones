@@ -43,6 +43,8 @@ typedef struct {
 
 int rtp_session_create(rtp_session_t *session, const char *server_ip, const int server_port);
 
-size_t rtp_send_packet(rtp_session_t *session, const uint8_t *data, const size_t data_size, const int marker);
+ssize_t rtp_send_packet(rtp_session_t *session, const uint8_t *data, const size_t data_size, const int marker);
+
+void rtp_session_destroy(rtp_session_t *session);
 
 #endif /* RTP_CLIENT_H */

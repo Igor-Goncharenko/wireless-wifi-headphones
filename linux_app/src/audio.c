@@ -1,4 +1,5 @@
 #include "audio.h"
+#include "ringbuf.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,8 +10,6 @@
 #include <pulse/thread-mainloop.h>
 #include <pulse/volume.h>
 
-#include "rtp_client.h"
-
 #define CONTEXT_NAME "WiFi Headphones Output"
 #define DEVICE_NAME "WifiHeadphones"
 #define DEVICE_DESC "WiFi-Headphones"
@@ -18,19 +17,16 @@
 
 static void stream_read_cb(pa_stream *s, size_t length, void *userdata) {
     pulse_audio_t *pulse = (pulse_audio_t*) userdata;
+    size_t actual_len = length;
     const void *data;
-    int packets;
 
-    if (pa_stream_peek(s, &data, &length) < 0) return;
+    if (pa_stream_peek(s, &data, &actual_len) < 0) return;
 
-    if (data != NULL && length > 0) {
-        printf("Audio captured: %zu bytes \n", length);
+    if (data != NULL && actual_len > 0) {
+        printf("Audio captured: %zu bytes \n", actual_len);
 
-        if ((packets = rtp_send_packet(pulse->session, data, length, 0)) > 0) {
-            printf("Sent %d packets\n", packets);
-        }
-        else {
-            printf("Failed to sent packets\n");
+        if (ringbuf_write(&pulse->audio_buf, data, actual_len) < actual_len) {
+            fprintf(stderr, "WARNING: Audio buffer overflow, dropping %zu bytes\n", actual_len);
         }
     }
 
@@ -47,7 +43,6 @@ static void context_state_cb(pa_context *c, void *userdata) {
 
 static void stream_state_cb(pa_stream *s, void *userdata) {
     //pulse_audio_t *pulse = (pulse_audio_t*) userdata;
-
 }
 
 static void load_module_cb(pa_context *c, uint32_t idx, void *userdata) {
@@ -159,34 +154,6 @@ static int pulse_audio_init(pulse_audio_t *pulse) {
     return 0;
 }
 
-int audio_init(pulse_audio_t *pulse, rtp_session_t *session) {
-    pulse->session = session;
-
-    if (pulse_audio_init(pulse) != 0) {
-        printf("Failed to init PulseAudio\n");
-        return -1;
-    }
-    
-    if (create_virtual_sink(pulse) != 0) {
-        printf("Failed to create virtual sink\n");
-        return -1;
-    }
-    
-    if (create_monitor_stream(pulse) != 0) {
-        printf("Failed to create monitor stream\n");
-        return -1;
-    }
-    
-    printf("Virtual output device created via PulseAudio API!\n");
-    printf("Check: pactl list sinks short | grep Wifi\n");
-    printf("Press Enter to stop...\n");
-    
-    char buf[4];
-    scanf("%s", buf);
-    
-    return 0;
-}
-
 void audio_destroy(pulse_audio_t *pulse) {
     if (pulse->stream) {
         pa_stream_disconnect(pulse->stream);
@@ -205,4 +172,30 @@ void audio_destroy(pulse_audio_t *pulse) {
         pa_threaded_mainloop_free(pulse->mainloop);
         pulse->mainloop = NULL;
     }
+
+    ringbuf_destroy(&pulse->audio_buf);
+}
+
+int audio_init(pulse_audio_t *pulse) {
+    if (pulse_audio_init(pulse) != 0) {
+        fprintf(stderr, "Failed to init PulseAudio\n");
+        goto error;
+    }
+    if (create_virtual_sink(pulse) != 0) {
+        fprintf(stderr, "Failed to create virtual sink\n");
+        goto error;
+    }
+    if (create_monitor_stream(pulse) != 0) {
+        fprintf(stderr, "Failed to create monitor stream\n");
+        goto error;
+    }
+    if (ringbuf_init(&pulse->audio_buf, AUDIO_BUF_SIZE) != 0) {
+        fprintf(stderr, "Failed to init audio buffer\n");
+        goto error;
+    }
+    return 0;
+
+error:
+    audio_destroy(pulse);
+    return -1;
 }

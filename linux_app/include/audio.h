@@ -6,7 +6,9 @@
 #include <pulse/thread-mainloop.h>
 #include <pulse/volume.h>
 
-#include "rtp_client.h"
+#include "ringbuf.h"
+
+#define AUDIO_BUF_SIZE (1024 * 256)
 
 typedef struct {
     pa_threaded_mainloop *mainloop;
@@ -14,11 +16,10 @@ typedef struct {
     pa_stream *stream;
     uint32_t module_idx;
     int module_loaded;
-    rtp_session_t *session;
-    uint32_t packet_count;
+    ringbuf_t audio_buf;
 } pulse_audio_t;
 
-int audio_init(pulse_audio_t *pulse, rtp_session_t *session);
+int audio_init(pulse_audio_t *pulse);
 
 void audio_destroy(pulse_audio_t *pulse);
 

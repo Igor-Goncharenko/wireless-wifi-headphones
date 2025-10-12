@@ -8,9 +8,15 @@
 
 #include "audio.h"
 #include "discovery.h"
+#include "ringbuf.h"
 #include "rtp_client.h"
 
 bool is_running = true;
+
+struct rtp_send_thread {
+    rtp_session_t *session;
+    ringbuf_t *buf;
+};
 
 void sigint_hndl(int sig) {
     printf("SIGINT\n");
@@ -32,6 +38,19 @@ int choose_headphones(const headphone_response_t *hps, const int n) {
     return idx;
 }
 
+void *send_data_with_rtp(void *arg) {
+    struct rtp_send_thread *rst = (struct rtp_send_thread*)arg;
+
+    while (is_running) {
+        uint8_t data[FRAMES_PER_PACKET];
+        size_t read = ringbuf_read_block(rst->buf, data, FRAMES_PER_PACKET);
+        rtp_send_packet(rst->session, data, read, 0);
+        usleep(1000);
+    }
+
+    return NULL;
+}
+
 int connect_to_wifi_hp(const char *ip4) {
     rtp_session_t session = { 0 };
     pulse_audio_t pulse = { 0 };
@@ -47,9 +66,18 @@ int connect_to_wifi_hp(const char *ip4) {
         return -1;
     }
 
+    pthread_t tid;
+    struct rtp_send_thread rst = {
+        .session = &session,
+        .buf = &pulse.audio_buf,
+    };
+    pthread_create(&tid, NULL, send_data_with_rtp, &rst);
+
     while (is_running) {
         sleep(1);
     }
+
+    pthread_join(tid, NULL);
 
     rtp_session_destroy(&session);
     audio_destroy(&pulse);

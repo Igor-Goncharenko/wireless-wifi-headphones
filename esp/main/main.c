@@ -14,9 +14,6 @@
 
 #include <inttypes.h>
 
-#define UDP_PORT 1234
-#define AUDIO_BUFFER_SIZE 1024
-
 #define ESP_WIFI_SAE_MODE WPA3_SAE_PWE_BOTH
 #define ESP_WIFI_SCAN_AUTH_MODE_THRESHOLD WIFI_AUTH_WPA2_PSK
 
@@ -26,18 +23,6 @@ static const char *TAG = "wifi station";
 #define WIFI_FAIL_BIT      BIT1
 static EventGroupHandle_t s_wifi_event_group;
 static int s_retry_num = 0;
-
-#define MULTICAST_GROUP "224.1.1.1"
-#define DISCOVERY_PORT 5000
-#define DISCOVERY_REQUEST "DISCOVER_HEADPHONES_REQUEST"
-
-#define RTP_PORT 5002
-#define RTP_PAYLOAD_TYPE 96
-#define AUDIO_SAMPLE_RATE 44100
-#define CHANNELS 2
-#define SAMPLE_SIZE 2
-#define FRAMES_PER_PACKET 256
-#define I2S_NUM I2S_NUM_0
 
 static RingbufHandle_t s_audio_ringbuf = NULL;
 
@@ -193,7 +178,7 @@ static void discovery_server_task(void *pvParameters)
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    server_addr.sin_port = htons(DISCOVERY_PORT);
+    server_addr.sin_port = htons(CONFIG_DISCOVERY_PORT);
     
     if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         ESP_LOGE(TAG, "Bind failed");
@@ -203,7 +188,7 @@ static void discovery_server_task(void *pvParameters)
     }
     
     struct ip_mreq mreq;
-    mreq.imr_multiaddr.s_addr = inet_addr(MULTICAST_GROUP);
+    mreq.imr_multiaddr.s_addr = inet_addr(CONFIG_MULTICAST_GROUP);
     mreq.imr_interface.s_addr = htonl(INADDR_ANY);
     
     if (setsockopt(sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
@@ -213,7 +198,7 @@ static void discovery_server_task(void *pvParameters)
         return;
     }
     
-    ESP_LOGI(TAG, "Discovery server started on port %d", DISCOVERY_PORT);
+    ESP_LOGI(TAG, "Discovery server started on port %d", CONFIG_DISCOVERY_PORT);
     
     while (1) {
         recv_len = recvfrom(sockfd, buffer, sizeof(buffer) - 1, 0,
@@ -224,7 +209,7 @@ static void discovery_server_task(void *pvParameters)
             //ESP_LOGI(TAG, "Received: %s from " IPSTR, buffer, 
             //         IP2STR(&client_addr.sin_addr.s_addr));
             
-            if (strcmp(buffer, DISCOVERY_REQUEST) == 0) {
+            if (strcmp(buffer, CONFIG_DISCOVERY_REQUEST) == 0) {
                 int response_len = create_discovery_response(response, sizeof(response));
                
                 if (sendto(sockfd, response, response_len, 0,
@@ -266,7 +251,7 @@ static void rtp_receiver_task(void *args) {
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    server_addr.sin_port = htons(RTP_PORT);
+    server_addr.sin_port = htons(CONFIG_RTP_PORT);
     
     if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         ESP_LOGE(TAG, "Bind failed");
@@ -275,7 +260,7 @@ static void rtp_receiver_task(void *args) {
         return;
     }
     
-    ESP_LOGI(TAG, "RTP server started on port %d", RTP_PORT);
+    ESP_LOGI(TAG, "RTP server started on port %d", CONFIG_RTP_PORT);
     
     while (1) {
         recv_len = recvfrom(sockfd, buffer, sizeof(buffer), 0,
@@ -289,7 +274,7 @@ static void rtp_receiver_task(void *args) {
                 continue;
             }
             
-            if (header->payload_types != RTP_PAYLOAD_TYPE) {
+            if (header->payload_types != CONFIG_RTP_PAYLOAD_TYPE) {
                 ESP_LOGW(TAG, "Unexpected payload type: %d", header->payload_types);
                 continue;
             }
@@ -331,6 +316,10 @@ static void rtp_receiver_task(void *args) {
     close(sockfd);
     vTaskDelete(NULL);
 }
+
+
+
+
 
 static void audio_play(void *arg) {
     size_t item_size;

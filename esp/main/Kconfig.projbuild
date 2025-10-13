@@ -1,27 +1,75 @@
 menu "WiFi Headphones Configuration"
 
-    config WIFI_SSID
-        string "WiFi SSID"
-        default "myssid"
-        help
-            SSID (network name) for the example to connect to.
+    menu "WiFi conf"
+        config WIFI_SSID
+            string "WiFi SSID"
+            default "myssid"
+            help
+                SSID (network name) for the example to connect to.
 
-    config WIFI_PASSWORD
-        string "WiFi Password"
-        default "mypassword"
-        help
-            WiFi password (WPA or WPA2) for the example to use.
+        config WIFI_PASSWORD
+            string "WiFi Password"
+            default "mypassword"
+            help
+                WiFi password (WPA or WPA2) for the example to use.
 
-    config WIFI_MAXIMUM_RETRY
-        int "Maximum retry"
-        default 5
-        help
-            Set the Maximum retry to avoid station reconnecting to the AP unlimited when the AP is really inexistent.
+        config WIFI_MAXIMUM_RETRY
+            int "Maximum retry"
+            default 5
+            help
+                Set the Maximum retry to avoid station reconnecting to the AP unlimited when the AP is really inexistent.
 
-    config WIFI_PW_ID
-        string "PASSWORD IDENTIFIER"
-        default ""
-        help
-            password identifier for SAE H2E
+        config WIFI_PW_ID
+            string "PASSWORD IDENTIFIER"
+            default ""
+            help
+                password identifier for SAE H2E
+    endmenu
+
+    menu "Network conf"
+        config MULTICAST_GROUP
+            string "Multicast group (discovery)"
+            default "224.1.1.1"
+
+        config DISCOVERY_PORT
+            int "Discovery server port"
+            default 5000
+        
+        config DISCOVERY_REQUEST
+            string "Discovery request"
+            default "DISCOVER_HEADPHONES_REQUEST"
+
+        config RTP_PORT
+            int "RTP port"
+            default 5002
+
+        config RTP_PAYLOAD_TYPE
+            int "RTP payload type"
+            default 96
+
+        config RTP_PACKET_SIZE
+            int "RTP packet size"
+            default 256
+            range 256 2048
+    endmenu
+
+    menu "Sound conf"
+        config AUDIO_SAMPLE_RATE
+            int "Sample rate"
+            default 44100
+        
+        config AUDIO_CHANNELS
+            int "Channels"
+            default 2
+            range 1 2
+
+        config AUDIO_SAMPLE_SIZE
+            int "Sample size [bytes]"
+            default 2
+            range 1 4
+    endmenu
+
+    menu "Hardware conf"
+    endmenu
 
 endmenu

@@ -1,6 +1,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "freertos/ringbuf.h"
 #include "esp_mac.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
@@ -24,6 +25,7 @@ static const char *TAG = "wifi station";
 #define WIFI_CONNECTED_BIT BIT0
 #define WIFI_FAIL_BIT      BIT1
 static EventGroupHandle_t s_wifi_event_group;
+static int s_retry_num = 0;
 
 #define MULTICAST_GROUP "224.1.1.1"
 #define DISCOVERY_PORT 5000
@@ -37,7 +39,7 @@ static EventGroupHandle_t s_wifi_event_group;
 #define FRAMES_PER_PACKET 256
 #define I2S_NUM I2S_NUM_0
 
-static int s_retry_num = 0;
+static RingbufHandle_t s_audio_ringbuf = NULL;
 
 typedef struct {
     char model[32];
@@ -303,12 +305,16 @@ static void rtp_receiver_task(void *args) {
             expected_sequence = sequence + 1;
             
             size_t audio_data_size = recv_len - sizeof(rtp_header_t);
-            //uint8_t* audio_data = buffer + sizeof(rtp_header_t);
             
-            // send data to i2s
-            //size_t bytes_written;
-            //i2s_write(I2S_NUM, audio_data, audio_data_size, &bytes_written, portMAX_DELAY);
-            
+            UBaseType_t res = xRingbufferSend(s_audio_ringbuf, buffer + sizeof(rtp_header_t), 
+                                              audio_data_size, pdMS_TO_TICKS(100));
+            if (res != pdTRUE) {
+                ESP_LOGW(TAG, "Ring buffer full, dropped %d bytes", audio_data_size);
+            } else {
+                ESP_LOGD(TAG, "Received %d bytes, buffer free: %d", 
+                         audio_data_size, xRingbufferGetCurFreeSize(s_audio_ringbuf));
+            }
+
             packets_received++;
 
             ESP_LOGI(TAG, "Audio data got : %u; packets received : %" PRIu32, audio_data_size);
@@ -326,6 +332,33 @@ static void rtp_receiver_task(void *args) {
     vTaskDelete(NULL);
 }
 
+static void audio_play(void *arg) {
+    size_t item_size;
+    uint8_t* item;
+    //uint8_t audio_buffer[1024];
+
+    while (1) {
+        item = (uint8_t*)xRingbufferReceive(s_audio_ringbuf, &item_size, pdMS_TO_TICKS(100));
+
+        if (item != NULL) {
+            vRingbufferReturnItem(s_audio_ringbuf, item);
+        }
+
+        vTaskDelay(1 / portTICK_PERIOD_MS);
+    }
+}
+
+static int init_ringbuf(void) {
+    s_audio_ringbuf = xRingbufferCreate(64 * 1024, RINGBUF_TYPE_BYTEBUF);
+    if (s_audio_ringbuf == NULL) {
+        ESP_LOGE(TAG, "Failed to create ringbuf");
+        return -1;
+    }
+
+    ESP_LOGI(TAG, "Ringbuf created successfully");
+    return 0;
+}
+
 void app_main(void)
 {
     esp_err_t ret = nvs_flash_init();
@@ -335,6 +368,8 @@ void app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
+    init_ringbuf();
+
     ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
     wifi_init_sta();
 
@@ -343,6 +378,6 @@ void app_main(void)
     init_device_info();
     
     xTaskCreate(discovery_server_task, "discovery_server", 4096, NULL, 5, NULL);
-
     xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, NULL, 5, NULL);
+    xTaskCreate(audio_play, "audio_play", 4096, NULL, 6, NULL);
 }

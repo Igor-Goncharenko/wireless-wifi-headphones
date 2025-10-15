@@ -64,9 +64,15 @@ void app_main(void)
     wifi_init_sta();
     vTaskDelay(pdMS_TO_TICKS(5000));
 
-    init_ringbuf(&rb);
+    if (init_ringbuf(&rb) != 0) {
+        ESP_LOGE(TAG, "Failed to create ringbuf");
+        return;
+    }
 
-    rtp_server_init(&rtp, &rb);
+    if (rtp_server_init(&rtp, &rb) != 0) {
+        ESP_LOGE(TAG, "Failed to init rtp server");
+        return;
+    }
 
     xTaskCreate(discovery_server_task, "discovery_server", 4096, NULL, 5, NULL);
     xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, &rtp, 5, NULL);

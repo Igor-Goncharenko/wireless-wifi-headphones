@@ -14,14 +14,7 @@ static const char *TAG = "WHP " __FILE__;
 
 int rtp_server_init(rtp_server_t *rtp_ser, const RingbufHandle_t rb) {
     if ((rtp_ser->sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        ESP_LOGE(TAG, "Failed to create socket");
-        return -1;
-    }
-
-    if (bind(rtp_ser->sockfd, (struct sockaddr *)&rtp_ser->server_addr, sizeof(rtp_ser->server_addr)) < 0) {
-        ESP_LOGE(TAG, "Bind failed");
-        close(rtp_ser->sockfd);
-        rtp_ser->sockfd = -1;
+        ESP_LOGE(TAG, "RTP server failed to create socket");
         return -1;
     }
 
@@ -29,6 +22,13 @@ int rtp_server_init(rtp_server_t *rtp_ser, const RingbufHandle_t rb) {
     rtp_ser->server_addr.sin_family = AF_INET;
     rtp_ser->server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     rtp_ser->server_addr.sin_port = htons(CONFIG_RTP_PORT);
+
+    if (bind(rtp_ser->sockfd, (struct sockaddr *)&rtp_ser->server_addr, sizeof(rtp_ser->server_addr)) < 0) {
+        ESP_LOGE(TAG, "RTP server bind failed");
+        close(rtp_ser->sockfd);
+        rtp_ser->sockfd = -1;
+        return -1;
+    }
 
     rtp_ser->expected_sequence = 0;
     rtp_ser->packets_received = 0;

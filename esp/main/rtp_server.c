@@ -13,9 +13,16 @@ static const char *TAG = "WHP " __FILE__;
 #define PACKET_BUFFER_SIZE (CONFIG_RTP_PACKET_SIZE + sizeof(rtp_header_t) + 1)
 
 int rtp_server_init(rtp_server_t *rtp_ser, const RingbufHandle_t rb) {
+    memset(rtp_ser, 0, sizeof(rtp_server_t));
+
     if ((rtp_ser->sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         ESP_LOGE(TAG, "RTP server failed to create socket");
         return -1;
+    }
+
+    int enable = 1;
+    if (setsockopt(rtp_ser->sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) < 0) {
+        ESP_LOGW(TAG, "setsockopt SO_REUSEADDR failed");
     }
 
     memset(&rtp_ser->server_addr, 0, sizeof(rtp_ser->server_addr));
@@ -35,7 +42,8 @@ int rtp_server_init(rtp_server_t *rtp_ser, const RingbufHandle_t rb) {
     rtp_ser->packets_lost = 0;
 
     rtp_ser->rb = rb;
-    
+
+    ESP_LOGI(TAG, "RTP server initialized: sockfd=%d, port=%d", rtp_ser->sockfd, CONFIG_RTP_PORT);
     return 0;
 }
 
@@ -45,10 +53,17 @@ void rtp_server_destroy(rtp_server_t *rtp_ser) {
     }
 
     memset(rtp_ser, 0, sizeof(rtp_server_t));
+    ESP_LOGI(TAG, "RTP server destroyed");
 }
 
 void rtp_receiver_task(void *arg) {
     rtp_server_t *server = (rtp_server_t*)arg;
+
+    if (server == NULL || server->sockfd < 0 || server->rb == NULL) {
+        ESP_LOGE(TAG, "Invalid server state");
+        vTaskDelete(NULL);
+        return;
+    }
 
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
@@ -61,7 +76,22 @@ void rtp_receiver_task(void *arg) {
         recv_len = recvfrom(server->sockfd, buffer, sizeof(buffer), 0,
                             (struct sockaddr *)&client_addr, &client_len);
         
-        if (recv_len > (ssize_t)sizeof(rtp_header_t)) {
+        if (recv_len < 0) {
+            int err = errno;
+            ESP_LOGE(TAG, "recvfrom failed: error %d (%s), sockfd=%d", 
+                     err, strerror(err), server->sockfd);
+
+            int error = 0;
+            socklen_t len = sizeof(error);
+            if (getsockopt(server->sockfd, SOL_SOCKET, SO_ERROR, &error, &len) == 0) {
+                ESP_LOGE(TAG, "Socket error: %d (%s)", error, strerror(error));
+            }
+            
+            vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
+        if (recv_len >= (ssize_t)sizeof(rtp_header_t)) {
             const rtp_header_t *header = (rtp_header_t*)buffer;
             
             if (header->ver != 2) {

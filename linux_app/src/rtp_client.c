@@ -38,7 +38,7 @@ void rtp_session_destroy(rtp_session_t *session) {
 
 static ssize_t rtp_send_packet_small(rtp_session_t *session, const uint8_t *data, 
                                      const size_t data_size, const int marker) {
-    uint8_t packet[MAX_PACKET_SIZE];
+    uint8_t packet[PACKET_SIZE];
     rtp_header_t *header = (rtp_header_t*) packet;
 
     header->ver = RTP_VERSION;
@@ -65,7 +65,7 @@ static ssize_t rtp_send_packet_small(rtp_session_t *session, const uint8_t *data
 
 ssize_t rtp_send_packet(rtp_session_t *session, const uint8_t *data, 
                         const size_t data_size, const int marker) {
-    if (data_size <= MAX_PACKET_SIZE) {
+    if (data_size <= PACKET_SIZE) {
         return (rtp_send_packet_small(session, data, data_size, marker) != 0) ? 1 : 0;
     }
 
@@ -75,8 +75,8 @@ ssize_t rtp_send_packet(rtp_session_t *session, const uint8_t *data,
     int packet_count = 0;
 
     while (remaining > 0) {
-        ssize_t fragment_size = (remaining > MAX_PACKET_SIZE) ?
-                                MAX_PACKET_SIZE : remaining;
+        ssize_t fragment_size = (remaining > PACKET_SIZE) ?
+                                PACKET_SIZE : remaining;
         
         const int fragment_marker = (remaining == fragment_size) ? marker : 0;
         

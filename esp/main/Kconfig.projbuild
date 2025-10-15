@@ -49,7 +49,7 @@ menu "WiFi Headphones Configuration"
 
         config RTP_PACKET_SIZE
             int "RTP packet size"
-            default 256
+            default 1024
             range 256 2048
     endmenu
 
@@ -70,6 +70,20 @@ menu "WiFi Headphones Configuration"
     endmenu
 
     menu "Hardware conf"
+        config I2S_BCLK_GPIO
+            int "I2S BCLK GPIO"
+            default 26
+            range 2 39
+
+        config I2S_WS_GPIO
+            int "I2S WS GPIO"
+            default 25
+            range 2 39
+
+        config I2S_DIN_GPIO
+            int "I2S DIN GPIO"
+            default 22
+            range 2 39
     endmenu
 
 endmenu

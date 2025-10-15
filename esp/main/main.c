@@ -39,25 +39,36 @@ static int init_ringbuf(RingbufHandle_t *rb) {
     return 0;
 }
 
+static void clear_ringbuf(const RingbufHandle_t rb) {
+    size_t item_size;
+    char *item;
+    
+    while ((item = (char *)xRingbufferReceive(rb, &item_size, 0))) {
+        vRingbufferReturnItem(rb, item);
+    }
+}
+
 void app_main(void)
 {
-    esp_err_t ret = nvs_flash_init();
+    RingbufHandle_t rb = NULL;
+    rtp_server_t rtp = { 0 };
+    esp_err_t ret;
+
+    ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
       ESP_ERROR_CHECK(nvs_flash_erase());
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
 
-    RingbufHandle_t rb = NULL;
+    wifi_init_sta();
+    vTaskDelay(pdMS_TO_TICKS(5000));
 
     init_ringbuf(&rb);
 
-    ESP_LOGI(TAG, "ESP_WIFI_MODE_STA");
-    wifi_init_sta();
-
-    vTaskDelay(pdMS_TO_TICKS(5000));
+    rtp_server_init(&rtp, &rb);
 
     xTaskCreate(discovery_server_task, "discovery_server", 4096, NULL, 5, NULL);
-    xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, &rb, 5, NULL);
+    xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, &rtp, 5, NULL);
     xTaskCreate(audio_play, "audio_play", 4096, &rb, 6, NULL);
 }

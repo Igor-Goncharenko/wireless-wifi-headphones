@@ -5,12 +5,16 @@
 #include <signal.h>
 #include <sys/syslog.h>
 #include <unistd.h>
+#include <syslog.h>
 #include <sys/types.h>
 #include <sys/stat.h>
-#include <syslog.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 
 #include "ringbuf.h"
 #include "rtp_client.h"
+
+#define SOCKET_PATH "/tmp/" CONFIG_DAEMON_NAME ".sock"
 
 static volatile sig_atomic_t keep_running = 1;
 static FILE *logfile = NULL;
@@ -75,23 +79,39 @@ void daemon_cleanup(void) {
     closelog();
 }
 
-void daemon_workloop(void) {
-    int iteration = 0;
-    
-    while(keep_running) {
-        syslog(LOG_DEBUG, "Iteration %d", iteration++);
-        
-        if (logfile) {
-            fprintf(logfile, "Iteration %d\n", iteration);
-            fflush(logfile);
-        }
-        
-        int slept = 0;
-        while(keep_running && slept < 10) {
-            sleep(1);
-            slept++;
-        }
+int create_socket(void) {
+    int sockfd;
+    struct sockaddr_un addr;
+
+    if ((sockfd = socket(AF_UNIX, SOCK_STREAM, 0)) < 0) {
+        syslog(LOG_ERR, "Failed to create unix socket");
+        return -1;
     }
+
+    memset(&addr, 0, sizeof(struct sockaddr_un));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+
+    if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
+        syslog(LOG_ERR, "Failed to bind unix socket");
+        close(sockfd);
+        return -1;
+    }
+    if (listen(sockfd, 5) < 0) {
+        syslog(LOG_ERR, "Failed to listen unix socket");
+        close(sockfd);
+        return -1;
+    }
+
+    return sockfd;
+}
+
+void close_socket(int sockfd) {
+    if (sockfd > 0) {
+        close(sockfd);
+    }
+    unlink(SOCKET_PATH);
+
 }
 
 void signal_handler(int sig) {
@@ -104,6 +124,19 @@ void signal_handler(int sig) {
             break;
         default:
             break;
+    }
+}
+
+void process_command(const char *cmd, const int client_fd) {
+    if (strcmp(cmd, "STATUS") == 0) {
+        const char *response = "Daemon is working\n";
+        if (write(client_fd, response, strlen(response)) < 0) {
+            syslog(LOG_ERR, "Failed write command response");
+        } else {
+            syslog(LOG_INFO, "Got status command");
+        }
+    } else {
+        syslog(LOG_WARNING, "Unknown command %s", cmd);
     }
 }
 
@@ -144,9 +177,22 @@ int main(void) {
 
     atexit(daemon_cleanup);
 
-    daemon_workloop();
+    const int sockfd = create_socket();
+
+    while (keep_running) {
+        int client_fd = accept(sockfd, NULL, NULL);
+        char buffer[256];
+        ssize_t bytes = read(client_fd, buffer, sizeof(buffer) - 1);
+        if (bytes > 0) {
+            buffer[bytes - 1] = '\0';
+            process_command(buffer, client_fd);
+            sleep(1);
+        }
+        close(client_fd);
+    }
 
     daemon_cleanup();
+    close_socket(sockfd);
 
     return EXIT_SUCCESS;
 }

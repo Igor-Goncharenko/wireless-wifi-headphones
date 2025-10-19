@@ -2,15 +2,18 @@ SRC_DIR = src
 INC_DIR = include
 BLD_DIR = build
 
+TARGET_NAME = wifi_hp_app
+
 OBJ_DIR = $(BLD_DIR)/obj
 CC = gcc
 CFLAGS = -Wall -g `pkg-config --cflags libpulse` -I$(INC_DIR)
+CFLAGS += -DCONFIG_DAEMON_NAME="\"$(TARGET_NAME)\""
 LDFLAGS = `pkg-config --libs libpulse` -lpthread
 
 SRC = $(wildcard $(SRC_DIR)/*.c)
 OBJ = $(SRC:%.c=$(OBJ_DIR)/%.o) 
 
-TARGET = $(BLD_DIR)/wifi_hp_app
+TARGET = $(BLD_DIR)/$(TARGET_NAME)
 
 .PHONY: all clean_obj clean
 

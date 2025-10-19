@@ -1,47 +1,116 @@
 #include <errno.h>
-#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
+#include <sys/syslog.h>
 #include <unistd.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <syslog.h>
 
-#include "audio.h"
-#include "discovery.h"
 #include "ringbuf.h"
 #include "rtp_client.h"
 
-bool is_running = true;
+static volatile sig_atomic_t keep_running = 1;
+static FILE *logfile = NULL;
 
 struct rtp_send_thread {
     rtp_session_t *session;
     ringbuf_t *buf;
 };
 
-void sigint_hndl(int sig) {
-    printf("SIGINT\n");
-    is_running = false;
-}
+int daemon_init(void) {
+    pid_t pid;
 
-int choose_headphones(const headphone_response_t *hps, const int n) {
-    for (int i = 0; i < n; i++) {
-        printf("%d) %s %s %s %s\n", i + 1, hps[i].type, hps[i].model, hps[i].id, hps[i].ip_v4);
+    pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "Fork error: errno=%d, strerror=\"%s\"\n", errno, strerror(errno));
+        return -1;
+    }
+    if (pid > 0) {
+        return 1;
     }
 
-    int idx;
-    do {
-        printf("Choose headphones to connect[1-%d]: \n> ", n);
-    } while (scanf("%d", &idx) != 1 || idx < 1 || idx > n);
+    if (setsid() < 0) {
+        fprintf(stderr, "setsid() error: errno=%d, strerror=\"%s\"\n", errno, strerror(errno));
+        return -1;
+    }
 
-    idx--;
+    pid = fork();
+    if (pid < 0) {
+        fprintf(stderr, "Fork error: errno=%d, strerror=\"%s\"\n", errno, strerror(errno));
+        return -1;
+    }
+    if (pid > 0) {
+        return 1;
+    }
 
-    return idx;
+    chdir("/");
+    umask(0);
+
+    close(STDIN_FILENO);
+    close(STDOUT_FILENO);
+    close(STDERR_FILENO);
+
+    logfile = fopen("/tmp/" CONFIG_DAEMON_NAME ".log", "a");
+    if (!logfile) {
+        syslog(LOG_WARNING, "Failed to open log file: errno=%d, strerror=\"%s\"",
+                errno, strerror(errno));
+    }
+
+    return 0;
+}
+
+void daemon_cleanup(void) {
+    if (logfile != NULL) {
+        fclose(logfile);
+        logfile = NULL;
+        syslog(LOG_DEBUG, "log file closed");
+    }
+
+    unlink("/var/run/" CONFIG_DAEMON_NAME ".pid");
+    
+    syslog(LOG_INFO, "Daemon cleanup complete");
+    closelog();
+}
+
+void daemon_workloop(void) {
+    int iteration = 0;
+    
+    while(keep_running) {
+        syslog(LOG_DEBUG, "Iteration %d", iteration++);
+        
+        if (logfile) {
+            fprintf(logfile, "Iteration %d\n", iteration);
+            fflush(logfile);
+        }
+        
+        int slept = 0;
+        while(keep_running && slept < 10) {
+            sleep(1);
+            slept++;
+        }
+    }
+}
+
+void signal_handler(int sig) {
+    switch (sig) {
+        case SIGTERM:
+        case SIGINT:
+            syslog(LOG_INFO, "Got SIGTERM, stop");
+            closelog();
+            keep_running = 0;
+            break;
+        default:
+            break;
+    }
 }
 
 void *send_data_with_rtp(void *arg) {
     struct rtp_send_thread *rst = (struct rtp_send_thread*)arg;
 
-    while (is_running) {
+    while (keep_running) {
         uint8_t data[FRAMES_PER_PACKET];
         size_t read = ringbuf_read_block(rst->buf, data, FRAMES_PER_PACKET);
         rtp_send_packet(rst->session, data, read, 0);
@@ -51,71 +120,33 @@ void *send_data_with_rtp(void *arg) {
     return NULL;
 }
 
-int connect_to_wifi_hp(const char *ip4) {
-    rtp_session_t session = { 0 };
-    pulse_audio_t pulse = { 0 };
-
-    if (rtp_session_create(&session, ip4, RTP_PORT) != 0) {
-        fprintf(stderr, "Failed to init rtp session\n");
-        return -1;
-    }
-
-    if (audio_init(&pulse) != 0) {
-        fprintf(stderr, "Failed to init audio\n");
-        audio_destroy(&pulse);
-        return -1;
-    }
-
-    pthread_t tid;
-    struct rtp_send_thread rst = {
-        .session = &session,
-        .buf = &pulse.audio_buf,
-    };
-    pthread_create(&tid, NULL, send_data_with_rtp, &rst);
-
-    while (is_running) {
-        sleep(1);
-    }
-
-    pthread_join(tid, NULL);
-
-    rtp_session_destroy(&session);
-    audio_destroy(&pulse);
-
-    return 0;
-}
-
 int main(void) {
-    signal(SIGINT, sigint_hndl);
+    int ret;
 
-    discovery_server_t server = { 0 };
-    headphone_response_t hps[16];
-
-    if (discovery_server_init(&server) != 0) {
-        fprintf(stderr, "Failed to init discovery server. errno=%d, strerror=%s\n",
-                errno, strerror(errno));
-        discovery_server_destroy(&server);
+    ret = daemon_init();
+    if (ret == 1) {
+        return EXIT_SUCCESS;
+    } else if (ret == -1) {
+        fprintf(stderr, "Failed to init daemon\n");
         return EXIT_FAILURE;
     }
 
-    int cnt = discover_headphones(&server, hps, 16);
+    openlog(CONFIG_DAEMON_NAME, LOG_PID, LOG_DAEMON);
+    syslog(LOG_INFO, "daemon " CONFIG_DAEMON_NAME " started");
 
-    discovery_server_destroy(&server);
+    struct sigaction sa;
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT, &sa, NULL);
 
-    if (cnt > 0) {
-        int conn = choose_headphones(hps, cnt);
-        printf("Connecting to %s %s %s %s\n", hps[conn].type, hps[conn].model, hps[conn].id, 
-                hps[conn].ip_v4);
+    atexit(daemon_cleanup);
 
-        if (connect_to_wifi_hp(hps[conn].ip_v4) != 0) {
-            printf("Failed to connect to wifi headphones\n");
-            return EXIT_FAILURE;
-        }
+    daemon_workloop();
 
-    }
-    else {
-        printf("Nothing found\n");
-    }
+    daemon_cleanup();
 
     return EXIT_SUCCESS;
 }

@@ -1,9 +1,14 @@
 #include "discovery.h"
 
+#include <errno.h>
+#include <pthread.h>
 #include <stdio.h>
+#include <sys/syslog.h>
 #include <time.h>
 #include <string.h>
+#include <stdbool.h>
 #include <unistd.h>
+#include <syslog.h>
 #include <arpa/inet.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -13,7 +18,7 @@
 #define DISCOVERY_TIMEOUT 5
 #define BUFFER_SIZE 1024
 
-int discovery_server_init(discovery_server_t *server) {
+static int discovery_server_init(discovery_server_t *server) {
     if ((server->sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         perror("socket creation failed");
         return -1;
@@ -54,7 +59,7 @@ int discovery_server_init(discovery_server_t *server) {
     return 0;
 }
 
-void discovery_server_destroy(discovery_server_t *server) {
+static void discovery_server_destroy(discovery_server_t *server) {
     // close multicast group
     setsockopt(server->sockfd, IPPROTO_IP, IP_DROP_MEMBERSHIP, &server->mreq, sizeof(server->mreq));
     
@@ -65,7 +70,7 @@ void discovery_server_destroy(discovery_server_t *server) {
     }
 }
 
-int discover_headphones(const discovery_server_t *server, headphone_response_t *devices, const int max_devices) {
+static int discover_headphones(const discovery_server_t *server, headphone_response_t *devices, const int max_devices) {
     char buffer[BUFFER_SIZE];
     int device_count = 0;
 
@@ -115,4 +120,53 @@ int discover_headphones(const discovery_server_t *server, headphone_response_t *
     }
     
     return device_count;
+}
+
+int discovery_data_init(discovery_data_t *data) {
+    if (pthread_mutex_init(&data->mutex, NULL) != 0) {
+        syslog(LOG_ERR, "discovery data mutex init failed");
+        return -1;
+    }
+
+    data->is_discovering = false;
+    data->count = 0;
+
+    return 0;
+}
+
+void discovery_data_destroy(discovery_data_t *data) {
+    pthread_mutex_destroy(&data->mutex);
+    data->count = 0;
+    data->is_discovering = false;
+}
+
+int discover_task(discovery_data_t *data) {
+    if (data->is_discovering) {
+        syslog(LOG_WARNING, "Cannot start new discovery server while previous did not stop");
+        return -1;
+    }
+
+    discovery_server_t server = { 0 };
+    headphone_response_t hps[16];
+
+    pthread_mutex_lock(&data->mutex);
+    
+    data->is_discovering = true;
+
+    if (discovery_server_init(&server) != 0) {
+        syslog(LOG_ERR, "Failed to init discovery server. errno=%d, strerror=%s\n",
+               errno, strerror(errno));
+        discovery_server_destroy(&server);
+        return -1;
+    }
+
+    data->count = discover_headphones(&server, hps, 16);
+    memcpy(data->data, hps, data->count * sizeof(headphone_response_t));
+    data->is_discovering = false;
+
+    pthread_mutex_unlock(&data->mutex);
+
+    discovery_server_destroy(&server);
+
+    return 0;
 }

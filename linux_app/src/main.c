@@ -31,6 +31,7 @@ struct rtp_send_thread {
 struct process_command_arg {
     int client_fd;
     char command[MAX_COMMAND_LEN];
+    discovery_data_t *data_ptr;
 };
 
 int daemon_init(void) {
@@ -134,35 +135,33 @@ void signal_handler(int sig) {
     }
 }
 
-int discover_task(const int client_fd) {
-    discovery_server_t server = { 0 };
-    headphone_response_t hps[16];
+int discover(const int client_fd, discovery_data_t *data) {
+    char buffer[256];
+    int size;
 
-    if (discovery_server_init(&server) != 0) {
-        syslog(LOG_ERR, "Failed to init discovery server. errno=%d, strerror=%s\n",
-               errno, strerror(errno));
-        discovery_server_destroy(&server);
+    if (discover_task(data) != 0) {
+        syslog(LOG_ERR, "Failed to discover headphones");
         return -1;
     }
 
-    int cnt = discover_headphones(&server, hps, 16);
-    if (cnt > 0) {
-        char buffer[256];
-        int size;
-
-        size = sprintf(buffer, "Discovery finished, devices=%d\n", cnt);
+    pthread_mutex_lock(&data->mutex);
+    
+    if (data->count > 0) {
+        size = sprintf(buffer, "Discovery finished, devices=%d\n", data->count);
         write(client_fd, buffer, size);
 
-        for (int i = 0; i < cnt; i++) {
-            size = sprintf(buffer, " %d) type=%s; model=%s; id=%s; ip4=%s\n",
-                           i + 1, hps[i].type, hps[i].model, hps[i].id, hps[i].ip_v4);
+        for (int i = 0; i < data->count; i++) {
+            size = sprintf(buffer, " %d) type=%s; model=%s; id=%s; ip4=%s\n", 
+                           i + 1, data->data[i].type, data->data[i].model, data->data[i].id, 
+                           data->data[i].ip_v4);
             write(client_fd, buffer, size);
         }
     } else {
-        const char resp[] = "Nothing found\n";
-        write(client_fd, resp, sizeof(resp) - 1);
+        const char response[] = "Discovery finished, nothing found\n";
+        write(client_fd, response, sizeof(response) - 1);
     }
-    discovery_server_destroy(&server);
+
+    pthread_mutex_unlock(&data->mutex);
 
     return 0;
 }
@@ -174,7 +173,7 @@ void *process_command_task(void *arg) {
         const char *response = "Daemon is working\n";
         write(pc_arg->client_fd, response, strlen(response));
     } else if (strcmp(pc_arg->command, "DISCOVERY") == 0) {
-        discover_task(pc_arg->client_fd);
+        discover(pc_arg->client_fd, pc_arg->data_ptr);
     } else {
         syslog(LOG_WARNING, "Unknown command %s", pc_arg->command);
     }
@@ -200,6 +199,7 @@ void *send_data_with_rtp(void *arg) {
 
 int main(void) {
     int ret;
+    discovery_data_t discovery_data;
 
     ret = daemon_init();
     if (ret == 1) {
@@ -228,12 +228,21 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
+    if (discovery_data_init(&discovery_data) != 0) {
+        syslog(LOG_ERR, "Failed to init discovery data");
+        daemon_cleanup();
+        close_socket(sockfd);
+        closelog();
+        return EXIT_FAILURE;
+    }
+
     while (keep_running) {
         struct process_command_arg *arg = malloc(sizeof(struct process_command_arg));
         if (!arg) {
             syslog(LOG_ERR, "Failed to allocated memory for process_command_arg");
             continue;
         }
+        arg->data_ptr = &discovery_data;
 
         arg->client_fd = accept(sockfd, NULL, NULL);
         if (arg->client_fd < 0) {
@@ -266,6 +275,7 @@ int main(void) {
     syslog(LOG_INFO, "Shutting down gracefully...");
     daemon_cleanup();
     close_socket(sockfd);
+    discovery_data_destroy(&discovery_data);
     closelog();
 
     return EXIT_SUCCESS;

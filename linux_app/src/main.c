@@ -11,6 +11,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include "discovery.h"
 #include "ringbuf.h"
 #include "rtp_client.h"
 
@@ -133,12 +134,47 @@ void signal_handler(int sig) {
     }
 }
 
+int discover_task(const int client_fd) {
+    discovery_server_t server = { 0 };
+    headphone_response_t hps[16];
+
+    if (discovery_server_init(&server) != 0) {
+        syslog(LOG_ERR, "Failed to init discovery server. errno=%d, strerror=%s\n",
+               errno, strerror(errno));
+        discovery_server_destroy(&server);
+        return -1;
+    }
+
+    int cnt = discover_headphones(&server, hps, 16);
+    if (cnt > 0) {
+        char buffer[256];
+        int size;
+
+        size = sprintf(buffer, "Discovery finished, devices=%d\n", cnt);
+        write(client_fd, buffer, size);
+
+        for (int i = 0; i < cnt; i++) {
+            size = sprintf(buffer, " %d) type=%s; model=%s; id=%s; ip4=%s\n",
+                           i + 1, hps[i].type, hps[i].model, hps[i].id, hps[i].ip_v4);
+            write(client_fd, buffer, size);
+        }
+    } else {
+        const char resp[] = "Nothing found\n";
+        write(client_fd, resp, sizeof(resp) - 1);
+    }
+    discovery_server_destroy(&server);
+
+    return 0;
+}
+
 void *process_command_task(void *arg) {
     struct process_command_arg *pc_arg = (struct process_command_arg*) arg;
 
     if (strcmp(pc_arg->command, "STATUS") == 0) {
         const char *response = "Daemon is working\n";
         write(pc_arg->client_fd, response, strlen(response));
+    } else if (strcmp(pc_arg->command, "DISCOVERY") == 0) {
+        discover_task(pc_arg->client_fd);
     } else {
         syslog(LOG_WARNING, "Unknown command %s", pc_arg->command);
     }
@@ -180,7 +216,7 @@ int main(void) {
     sa.sa_handler = signal_handler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-    
+
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
 

@@ -15,6 +15,7 @@
 #include "rtp_client.h"
 
 #define SOCKET_PATH "/tmp/" CONFIG_DAEMON_NAME ".sock"
+#define LOGFILE_PATH "/tmp/" CONFIG_DAEMON_NAME ".log"
 
 static volatile sig_atomic_t keep_running = 1;
 static FILE *logfile = NULL;
@@ -53,15 +54,15 @@ int daemon_init(void) {
     chdir("/");
     umask(0);
 
+    logfile = fopen(LOGFILE_PATH, "a");
+    if (!logfile) {
+        fprintf(stderr, "Failed to open log file: errno=%d, strerror=\"%s\"",
+                errno, strerror(errno));
+    }
+
     close(STDIN_FILENO);
     close(STDOUT_FILENO);
     close(STDERR_FILENO);
-
-    logfile = fopen("/tmp/" CONFIG_DAEMON_NAME ".log", "a");
-    if (!logfile) {
-        syslog(LOG_WARNING, "Failed to open log file: errno=%d, strerror=\"%s\"",
-                errno, strerror(errno));
-    }
 
     return 0;
 }
@@ -73,10 +74,9 @@ void daemon_cleanup(void) {
         syslog(LOG_DEBUG, "log file closed");
     }
 
-    unlink("/var/run/" CONFIG_DAEMON_NAME ".pid");
+    unlink(SOCKET_PATH);
     
     syslog(LOG_INFO, "Daemon cleanup complete");
-    closelog();
 }
 
 int create_socket(void) {
@@ -119,7 +119,6 @@ void signal_handler(int sig) {
         case SIGTERM:
         case SIGINT:
             syslog(LOG_INFO, "Got SIGTERM, stop");
-            closelog();
             keep_running = 0;
             break;
         default:
@@ -175,8 +174,6 @@ int main(void) {
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
 
-    atexit(daemon_cleanup);
-
     const int sockfd = create_socket();
 
     while (keep_running) {
@@ -186,13 +183,13 @@ int main(void) {
         if (bytes > 0) {
             buffer[bytes - 1] = '\0';
             process_command(buffer, client_fd);
-            sleep(1);
         }
         close(client_fd);
     }
 
     daemon_cleanup();
     close_socket(sockfd);
+    closelog();
 
     return EXIT_SUCCESS;
 }

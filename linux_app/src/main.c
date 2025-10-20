@@ -17,12 +17,19 @@
 #define SOCKET_PATH "/tmp/" CONFIG_DAEMON_NAME ".sock"
 #define LOGFILE_PATH "/tmp/" CONFIG_DAEMON_NAME ".log"
 
+#define MAX_COMMAND_LEN 256
+
 static volatile sig_atomic_t keep_running = 1;
 static FILE *logfile = NULL;
 
 struct rtp_send_thread {
     rtp_session_t *session;
     ringbuf_t *buf;
+};
+
+struct process_command_arg {
+    int client_fd;
+    char command[MAX_COMMAND_LEN];
 };
 
 int daemon_init(void) {
@@ -126,17 +133,20 @@ void signal_handler(int sig) {
     }
 }
 
-void process_command(const char *cmd, const int client_fd) {
-    if (strcmp(cmd, "STATUS") == 0) {
+void *process_command_task(void *arg) {
+    struct process_command_arg *pc_arg = (struct process_command_arg*) arg;
+
+    if (strcmp(pc_arg->command, "STATUS") == 0) {
         const char *response = "Daemon is working\n";
-        if (write(client_fd, response, strlen(response)) < 0) {
-            syslog(LOG_ERR, "Failed write command response");
-        } else {
-            syslog(LOG_INFO, "Got status command");
-        }
+        write(pc_arg->client_fd, response, strlen(response));
     } else {
-        syslog(LOG_WARNING, "Unknown command %s", cmd);
+        syslog(LOG_WARNING, "Unknown command %s", pc_arg->command);
     }
+
+    close(pc_arg->client_fd);
+    free(arg);
+
+    return NULL;
 }
 
 void *send_data_with_rtp(void *arg) {
@@ -175,18 +185,49 @@ int main(void) {
     sigaction(SIGINT, &sa, NULL);
 
     const int sockfd = create_socket();
-
-    while (keep_running) {
-        int client_fd = accept(sockfd, NULL, NULL);
-        char buffer[256];
-        ssize_t bytes = read(client_fd, buffer, sizeof(buffer) - 1);
-        if (bytes > 0) {
-            buffer[bytes - 1] = '\0';
-            process_command(buffer, client_fd);
-        }
-        close(client_fd);
+    if (sockfd < 0) {
+        syslog(LOG_ERR, "Failed to create socket");
+        daemon_cleanup();
+        closelog();
+        return EXIT_FAILURE;
     }
 
+    while (keep_running) {
+        struct process_command_arg *arg = malloc(sizeof(struct process_command_arg));
+        if (!arg) {
+            syslog(LOG_ERR, "Failed to allocated memory for process_command_arg");
+            continue;
+        }
+
+        arg->client_fd = accept(sockfd, NULL, NULL);
+        if (arg->client_fd < 0) {
+            if (errno != EINTR) {
+                syslog(LOG_ERR, "Accept failed: %s", strerror(errno));
+            }
+            free(arg);
+            continue;
+        }
+
+        ssize_t bytes = read(arg->client_fd, arg->command, MAX_COMMAND_LEN - 1);
+
+        if (bytes > 0) {
+            pthread_t tid;
+
+            arg->command[bytes - 1] = '\0';
+            if ((ret = pthread_create(&tid, NULL, process_command_task, arg)) == 0) {
+                pthread_detach(tid);
+            } else {
+                syslog(LOG_ERR, "Failed to create thread: %s", strerror(ret));
+                close(arg->client_fd);
+                free(arg);
+            }
+        } else {
+            close(arg->client_fd);
+            free(arg);
+        }
+    }
+
+    syslog(LOG_INFO, "Shutting down gracefully...");
     daemon_cleanup();
     close_socket(sockfd);
     closelog();

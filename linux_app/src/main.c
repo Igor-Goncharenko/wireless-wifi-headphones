@@ -14,11 +14,10 @@
 #include "discovery.h"
 #include "ringbuf.h"
 #include "rtp_client.h"
+#include "command_handler.h"
 
 #define SOCKET_PATH "/tmp/" CONFIG_DAEMON_NAME ".sock"
 #define LOGFILE_PATH "/tmp/" CONFIG_DAEMON_NAME ".log"
-
-#define MAX_COMMAND_LEN 256
 
 static volatile sig_atomic_t keep_running = 1;
 static FILE *logfile = NULL;
@@ -26,12 +25,6 @@ static FILE *logfile = NULL;
 struct rtp_send_thread {
     rtp_session_t *session;
     ringbuf_t *buf;
-};
-
-struct process_command_arg {
-    int client_fd;
-    char command[MAX_COMMAND_LEN];
-    discovery_data_t *data_ptr;
 };
 
 int daemon_init(void) {
@@ -135,61 +128,6 @@ void signal_handler(int sig) {
     }
 }
 
-void send_discovery_data(const int client_fd, discovery_data_t *data) {
-    char buffer[256];
-    int size;
-
-    pthread_mutex_lock(&data->mutex);
-    
-    if (data->count > 0) {
-        size = sprintf(buffer, "devices=%d\n:", data->count);
-        write(client_fd, buffer, size);
-
-        for (int i = 0; i < data->count; i++) {
-            size = sprintf(buffer, " %d) type=%s; model=%s; id=%s; ip4=%s\n", 
-                           i + 1, data->data[i].type, data->data[i].model, data->data[i].id, 
-                           data->data[i].ip_v4);
-            write(client_fd, buffer, size);
-        }
-    } else {
-        const char response[] = "No devices found\n";
-        write(client_fd, response, sizeof(response) - 1);
-    }
-
-    pthread_mutex_unlock(&data->mutex);
-}
-
-int discover_and_send_data(const int client_fd, discovery_data_t *data) {
-    if (discover_task(data) != 0) {
-        syslog(LOG_ERR, "Failed to discover headphones");
-        return -1;
-    }
-
-    send_discovery_data(client_fd, data);
-
-    return 0;
-}
-
-void *process_command_task(void *arg) {
-    struct process_command_arg *pc_arg = (struct process_command_arg*) arg;
-
-    if (strcmp(pc_arg->command, "STATUS") == 0) {
-        const char *response = "Daemon is working\n";
-        write(pc_arg->client_fd, response, strlen(response));
-    } else if (strcmp(pc_arg->command, "DISCOVERY") == 0) {
-        discover_and_send_data(pc_arg->client_fd, pc_arg->data_ptr);
-    } else if (strcmp(pc_arg->command, "DISCOVERY_DATA") == 0) {
-        send_discovery_data(pc_arg->client_fd, pc_arg->data_ptr);
-    } else {
-        syslog(LOG_WARNING, "Unknown command %s", pc_arg->command);
-    }
-
-    close(pc_arg->client_fd);
-    free(arg);
-
-    return NULL;
-}
-
 void *send_data_with_rtp(void *arg) {
     struct rtp_send_thread *rst = (struct rtp_send_thread*)arg;
 
@@ -243,7 +181,7 @@ int main(void) {
     }
 
     while (keep_running) {
-        struct process_command_arg *arg = malloc(sizeof(struct process_command_arg));
+        process_command_arg_t *arg = malloc(sizeof(process_command_arg_t));
         if (!arg) {
             syslog(LOG_ERR, "Failed to allocated memory for process_command_arg");
             continue;

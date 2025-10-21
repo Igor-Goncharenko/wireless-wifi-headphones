@@ -19,6 +19,8 @@
 #define SOCKET_PATH "/tmp/" CONFIG_DAEMON_NAME ".sock"
 #define LOGFILE_PATH "/tmp/" CONFIG_DAEMON_NAME ".log"
 
+#define RINGBUF_SIZE (1024 * 128)
+
 static volatile sig_atomic_t keep_running = 1;
 static FILE *logfile = NULL;
 
@@ -128,22 +130,11 @@ void signal_handler(int sig) {
     }
 }
 
-void *send_data_with_rtp(void *arg) {
-    struct rtp_send_thread *rst = (struct rtp_send_thread*)arg;
-
-    while (keep_running) {
-        uint8_t data[FRAMES_PER_PACKET];
-        size_t read = ringbuf_read_block(rst->buf, data, FRAMES_PER_PACKET);
-        rtp_send_packet(rst->session, data, read, 0);
-        usleep(1000);
-    }
-
-    return NULL;
-}
-
 int main(void) {
     int ret;
+    ringbuf_t rb;
     discovery_data_t discovery_data;
+    rtp_connection_data_t connection_data;
 
     ret = daemon_init();
     if (ret == 1) {
@@ -172,10 +163,29 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
+    if (ringbuf_init(&rb, RINGBUF_SIZE) != 0) {
+        syslog(LOG_ERR, "Failed to init ring buffer");
+        daemon_cleanup();
+        close_socket(sockfd);
+        closelog();
+        return EXIT_FAILURE;
+    }
+
     if (discovery_data_init(&discovery_data) != 0) {
         syslog(LOG_ERR, "Failed to init discovery data");
         daemon_cleanup();
         close_socket(sockfd);
+        ringbuf_destroy(&rb);
+        closelog();
+        return EXIT_FAILURE;
+    }
+
+    if (rtp_connection_data_init(&connection_data, &rb) != 0) {
+        syslog(LOG_ERR, "Failed to init connection  data");
+        daemon_cleanup();
+        close_socket(sockfd);
+        ringbuf_destroy(&rb);
+        discovery_data_destroy(&discovery_data);
         closelog();
         return EXIT_FAILURE;
     }
@@ -186,7 +196,8 @@ int main(void) {
             syslog(LOG_ERR, "Failed to allocated memory for process_command_arg");
             continue;
         }
-        arg->data_ptr = &discovery_data;
+        arg->disc_data = &discovery_data;
+        arg->conn_data = &connection_data;
 
         arg->client_fd = accept(sockfd, NULL, NULL);
         if (arg->client_fd < 0) {
@@ -219,7 +230,9 @@ int main(void) {
     syslog(LOG_INFO, "Shutting down gracefully...");
     daemon_cleanup();
     close_socket(sockfd);
+    ringbuf_destroy(&rb);
     discovery_data_destroy(&discovery_data);
+    rtp_connection_data_destroy(&connection_data);
     closelog();
 
     return EXIT_SUCCESS;

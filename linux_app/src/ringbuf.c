@@ -13,6 +13,8 @@
        __typeof__ (b) _b = (b); \
      _a < _b ? _a : _b; })
 
+#define RINGBUF_READ_TIMEOUT_MS 1000
+
 int ringbuf_init(ringbuf_t *rb, size_t size) {
     if ((rb->buf = malloc(size)) == NULL) {
         syslog(LOG_ERR, "Failed to allocate memory for ring buffer");
@@ -73,11 +75,20 @@ size_t ringbuf_write(ringbuf_t *rb, const void *data, const size_t nbytes) {
 
 size_t ringbuf_read_block(ringbuf_t *rb, uint8_t *output, const size_t block_size) {
     pthread_mutex_lock(&rb->mutex);
+
+    struct timespec ts;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    ts.tv_nsec += (RINGBUF_READ_TIMEOUT_MS % 1000) * 1000000;
+    ts.tv_sec += RINGBUF_READ_TIMEOUT_MS / 1000 + ts.tv_nsec / 1000000000;
+    ts.tv_nsec %= 1000000000;
     
     while (rb->available < block_size) {
-        pthread_cond_wait(&rb->cond, &rb->mutex);
+        if (pthread_cond_timedwait(&rb->cond, &rb->mutex, &ts) != 0) {
+            pthread_mutex_unlock(&rb->mutex);
+            return 0;
+        }
     }
-    
+
     size_t to_read = block_size;
     if (rb->read_pos + to_read > rb->size) {
         size_t first_part = rb->size - rb->read_pos;

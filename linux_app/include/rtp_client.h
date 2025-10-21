@@ -1,8 +1,12 @@
 #ifndef RTP_CLIENT_H
 #define RTP_CLIENT_H
 
+#include <stdbool.h>
 #include <stdint.h>
+#include <pthread.h>
 #include <arpa/inet.h>
+
+#include "ringbuf.h"
 
 #define RTP_PORT 5002
 #define RTP_VERSION 2
@@ -41,10 +45,23 @@ typedef struct {
     uint32_t ssrc;
 } rtp_session_t;
 
-int rtp_session_create(rtp_session_t *session, const char *server_ip, const int server_port);
+typedef struct {
+    bool has_active_session;
+    rtp_session_t active_session;
+    pthread_t tid;
 
-ssize_t rtp_send_packet(rtp_session_t *session, const uint8_t *data, const size_t data_size, const int marker);
+    pthread_mutex_t mutex;
+    bool is_running;
 
-void rtp_session_destroy(rtp_session_t *session);
+    ringbuf_t *rb_ptr;
+} rtp_connection_data_t;
+
+int rtp_connection_data_init(rtp_connection_data_t *data, ringbuf_t *rb_ptr);
+
+void rtp_connection_data_destroy(rtp_connection_data_t *data);
+
+int rtp_connection_start(rtp_connection_data_t *data, const char *ip4);
+
+void rtp_connection_stop(rtp_connection_data_t *data);
 
 #endif /* RTP_CLIENT_H */

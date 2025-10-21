@@ -10,6 +10,7 @@
 #include <cJSON.h>
 
 #include "discovery.h"
+#include "rtp_client.h"
 
 static void parse_discovery_command(cJSON *data, discovery_command_data_t *out) {
     if (data == NULL) {
@@ -126,13 +127,18 @@ static int discover_and_send_data(const int client_fd, discovery_data_t *data, c
     return 0;
 }
 
-static int connect_device(const char *ip4) {
-    syslog(LOG_INFO, "Connecting to device with ip=%s", ip4);
+static int connect_device(rtp_connection_data_t *conn_data, const char *ip4) {
+    if (rtp_connection_start(conn_data, ip4) != 0) {
+        syslog(LOG_ERR, "Failed to start connection");
+        return -1;
+    }
+    syslog(LOG_INFO, "Successfully connected to device with ip=%s", ip4);
     return 0;
 }
 
-static int disconnect_device(const char *ip4) {
-    syslog(LOG_INFO, "Disconnecting from device with ip=%s", ip4);
+static int disconnect_device(rtp_connection_data_t *conn_data) {
+    rtp_connection_stop(conn_data);
+    syslog(LOG_INFO, "Disconnecting from device");
     return 0;
 }
 
@@ -154,16 +160,16 @@ void *process_command_task(void *arg) {
             write(pc_arg->client_fd, STATUS_RESP, sizeof(STATUS_RESP) - 1);
             break;
         case COMMAND_DISCOVERY:
-            discover_and_send_data(pc_arg->client_fd, pc_arg->data_ptr, command.discovery.duration);
+            discover_and_send_data(pc_arg->client_fd, pc_arg->disc_data, command.discovery.duration);
             break;
         case COMMAND_DISCOVERY_DATA:
-            send_discovery_data(pc_arg->client_fd, pc_arg->data_ptr);
+            send_discovery_data(pc_arg->client_fd, pc_arg->disc_data);
             break;
         case COMMAND_CONNECT:
-            connect_device(command.connect.ip4);
+            connect_device(pc_arg->conn_data, command.connect.ip4);
             break;
         case COMMAND_DISCONNECT:
-            disconnect_device(command.connect.ip4);
+            disconnect_device(pc_arg->conn_data);
             break;
         case COMMAND_UNKNOWN:
             syslog(LOG_WARNING, "Got COMMAND_UNKNOWN");

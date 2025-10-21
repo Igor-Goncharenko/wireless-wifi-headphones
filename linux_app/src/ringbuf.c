@@ -6,6 +6,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <syslog.h>
 
  #define min(a,b) \
    ({ __typeof__ (a) _a = (a); \
@@ -14,7 +15,7 @@
 
 int ringbuf_init(ringbuf_t *rb, size_t size) {
     if ((rb->buf = malloc(size)) == NULL) {
-        fprintf(stderr, "Failed to allocate memory for ring buffer\n");
+        syslog(LOG_ERR, "Failed to allocate memory for ring buffer");
         return -1;
     }
 
@@ -24,14 +25,14 @@ int ringbuf_init(ringbuf_t *rb, size_t size) {
     rb->available = size;
 
     if (pthread_mutex_init(&rb->mutex, NULL) != 0) {
-        fprintf(stderr, "Failed to init pthread mutex: errno=%d, strerror=\"%s\"\n",
+        syslog(LOG_ERR, "Failed to init pthread mutex: errno=%d, strerror=\"%s\"",
                 errno, strerror(errno));
         free(rb->buf);
         return -1;
     }
 
     if (pthread_cond_init(&rb->cond, NULL) != 0) {
-        fprintf(stderr, "Failed to init pthread cond: errno=%d, strerror=\"%s\"\n",
+        syslog(LOG_ERR, "Failed to init pthread cond: errno=%d, strerror=\"%s\"",
                 errno, strerror(errno));
         pthread_mutex_destroy(&rb->mutex);
         free(rb->buf);

@@ -7,10 +7,11 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/socket.h>
+#include <syslog.h>
 
 int rtp_session_create(rtp_session_t *session, const char *server_ip, const int server_port) {
     if ((session->sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        fprintf(stderr, "RTP socket creating failed, errno=%d, strerror=\"%s\"\n", 
+        syslog(LOG_ERR, "RTP socket creating failed, errno=%d, strerror=\"%s\"", 
                 errno, strerror(errno));
         return -1;
     }
@@ -24,7 +25,7 @@ int rtp_session_create(rtp_session_t *session, const char *server_ip, const int 
     session->timestamp = 0;
     session->ssrc = rand();
 
-    printf("RTP session created, %s:%d\n", server_ip, server_port);
+    syslog(LOG_INFO, "RTP session created, %s:%d\n", server_ip, server_port);
 
     return 0;
 }

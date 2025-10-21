@@ -23,13 +23,15 @@
 
 static int discovery_server_init(discovery_server_t *server) {
     if ((server->sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        perror("socket creation failed");
+        syslog(LOG_ERR, "Failed to create discovery socket: errno=%d, strerror=\"%s\"",
+               errno, strerror(errno));
         return -1;
     }
     
     int reuse = 1;
     if (setsockopt(server->sockfd, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse)) < 0) {
-        perror("setsockopt SO_REUSEADDR failed");
+        syslog(LOG_ERR, "discovery server setsockopt SO_REUSEADDR failed: errno=%d, strerror=\"%s\"",
+               errno, strerror(errno));
         close(server->sockfd);
         return -1;
     }
@@ -40,7 +42,8 @@ static int discovery_server_init(discovery_server_t *server) {
     server->addr.sin_port = htons(DISCOVERY_PORT);
     
     if (bind(server->sockfd, (struct sockaddr*)&server->addr, sizeof(server->addr)) < 0) {
-        perror("bind failed");
+        syslog(LOG_ERR, "Failed to bind discovery socket: errno=%d, strerror=\"%s\"",
+               errno, strerror(errno));
         close(server->sockfd);
         return -1;
     }
@@ -49,21 +52,23 @@ static int discovery_server_init(discovery_server_t *server) {
     server->mreq.imr_interface.s_addr = htonl(INADDR_ANY);
     
     if (setsockopt(server->sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &server->mreq, sizeof(server->mreq)) < 0) {
-        perror("setsockopt IP_ADD_MEMBERSHIP failed");
+        syslog(LOG_ERR, "Discovery server setsockopt IP_ADD_MEMBERSHIP failed: errno=%d, strerror=\"%s\"",
+               errno, strerror(errno));
         close(server->sockfd);
         return -1;
     }
     
     struct timeval recv_timeout = {DISCOVERY_TIMEOUT, 0};
     if (setsockopt(server->sockfd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout)) < 0) {
-        perror("setsockopt SO_RCVTIMEO failed");
+        syslog(LOG_ERR, "Discovery server setsockopt SO_RCVTIMEO failed: errno=%d, strerror=\"%s\"",
+               errno, strerror(errno));
     }
 
     unsigned char loopback = 0;
     if (setsockopt(server->sockfd, IPPROTO_IP, IP_MULTICAST_LOOP, 
                 &loopback, sizeof(loopback)) < 0) {
-        perror("setsockopt IP_MULTICAST_LOOP");
-        return -1;
+        syslog(LOG_ERR, "Discovery server setsockopt IP_MULTICAST_LOOP failed: errno=%d, strerror=\"%s\"",
+               errno, strerror(errno));
     }
 
     return 0;
@@ -132,11 +137,12 @@ static int discover_headphones(const discovery_server_t *server, headphone_respo
     
     if (sendto(server->sockfd, DISCOVERY_REQUEST, sizeof(DISCOVERY_REQUEST) - 1, 0,
                (struct sockaddr*)&multicast_addr, sizeof(multicast_addr)) < 0) {
-        perror("sendto failed");
+        syslog(LOG_ERR, "Discovery server sendto failed: errno=%d, strerror=\"%s\"",
+               errno, strerror(errno));
         return -1;
     }
     
-    printf("Discovery request sent. Listening for responses...\n");
+    syslog(LOG_INFO, "Discovery request sent. Listening for responses...");
     
     time_t start_time = time(NULL);
     while ((time(NULL) - start_time) < DISCOVERY_TIMEOUT && device_count < max_devices) {

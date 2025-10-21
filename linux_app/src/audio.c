@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <string.h>
 #include <inttypes.h>
+#include <syslog.h>
 #include <pulse/pulseaudio.h>
 #include <pulse/thread-mainloop.h>
 #include <pulse/volume.h>
@@ -23,10 +24,8 @@ static void stream_read_cb(pa_stream *s, size_t length, void *userdata) {
     if (pa_stream_peek(s, &data, &actual_len) < 0) return;
 
     if (data != NULL && actual_len > 0) {
-        printf("Audio captured: %zu bytes \n", actual_len);
-
         if (ringbuf_write(&pulse->audio_buf, data, actual_len) < actual_len) {
-            fprintf(stderr, "WARNING: Audio buffer overflow, dropping %zu bytes\n", actual_len);
+            //fprintf(stderr, "WARNING: Audio buffer overflow, dropping %zu bytes\n", actual_len);
         }
     }
 
@@ -49,12 +48,12 @@ static void load_module_cb(pa_context *c, uint32_t idx, void *userdata) {
     pulse_audio_t *pulse = (pulse_audio_t*) userdata;
 
     if (idx == PA_INVALID_INDEX) {
-        fprintf(stderr, "ERROR: Module failed to load\n");
+        syslog(LOG_ERR, "Module failed to load");
         pulse->module_loaded = -1;
     } else {
         pulse->module_idx = idx;
         pulse->module_loaded = 1;
-        printf("Module loaded successfully, idx=%" PRIu32 "\n", idx);
+        syslog(LOG_INFO, "Module loaded successfully, idx=%" PRIu32, idx);
     }
 
     pa_threaded_mainloop_signal(pulse->mainloop, 0);
@@ -66,13 +65,12 @@ static int create_virtual_sink(pulse_audio_t *pulse) {
     pulse->module_loaded = 0;
     
     const char *args = "sink_name=" DEVICE_NAME " sink_properties=device.description=" DEVICE_DESC "";
-    printf("%s\n", args);
     
     pa_operation *op = pa_context_load_module(pulse->context, "module-null-sink", args, 
                                              load_module_cb, pulse);
     
     if (!op) {
-        fprintf(stderr, "Failed to create load module operation\n");
+        syslog(LOG_ERR, "Failed to create load module operation");
         pa_threaded_mainloop_unlock(pulse->mainloop);
         return -1;
     }
@@ -85,12 +83,12 @@ static int create_virtual_sink(pulse_audio_t *pulse) {
     pa_threaded_mainloop_unlock(pulse->mainloop);
 
     if (pulse->module_loaded == -1) {
-        fprintf(stderr, "Module loading failed\n");
+        syslog(LOG_ERR, "Module loading failed");
         return -1;
     }
 
     usleep(100000);
-    printf("Virtual sink created successfully\n");
+    syslog(LOG_INFO, "Virtual sink created successfully");
 
     return 0;
 }
@@ -107,7 +105,7 @@ static void remove_virtual_sink(pulse_audio_t *pulse) {
 
         pa_threaded_mainloop_unlock(pulse->mainloop);
         usleep(100000);
-        printf("Virtual sink removed\n");
+        syslog(LOG_INFO, "Virtual sink removed");
     }
 }
 
@@ -178,19 +176,19 @@ void audio_destroy(pulse_audio_t *pulse) {
 
 int audio_init(pulse_audio_t *pulse) {
     if (pulse_audio_init(pulse) != 0) {
-        fprintf(stderr, "Failed to init PulseAudio\n");
+        syslog(LOG_ERR, "Failed to init PulseAudio");
         goto error;
     }
     if (create_virtual_sink(pulse) != 0) {
-        fprintf(stderr, "Failed to create virtual sink\n");
+        syslog(LOG_ERR, "Failed to create virtual sink");
         goto error;
     }
     if (create_monitor_stream(pulse) != 0) {
-        fprintf(stderr, "Failed to create monitor stream\n");
+        syslog(LOG_ERR, "Failed to create monitor stream");
         goto error;
     }
     if (ringbuf_init(&pulse->audio_buf, AUDIO_BUF_SIZE) != 0) {
-        fprintf(stderr, "Failed to init audio buffer\n");
+        syslog(LOG_ERR, "Failed to init audio buffer");
         goto error;
     }
     return 0;

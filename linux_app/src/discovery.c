@@ -17,7 +17,6 @@
 
 #define MULTICAST_GROUP "224.1.1.1"
 #define DISCOVERY_PORT 5000
-#define DISCOVERY_TIMEOUT 5
 #define BUFFER_SIZE 1024
 #define DISCOVERY_REQUEST "DISCOVER_HEADPHONES_REQUEST"
 
@@ -58,7 +57,7 @@ static int discovery_server_init(discovery_server_t *server) {
         return -1;
     }
     
-    struct timeval recv_timeout = {DISCOVERY_TIMEOUT, 0};
+    struct timeval recv_timeout = {MAX_DISCOVERY_DURATION, 0};
     if (setsockopt(server->sockfd, SOL_SOCKET, SO_RCVTIMEO, &recv_timeout, sizeof(recv_timeout)) < 0) {
         syslog(LOG_ERR, "Discovery server setsockopt SO_RCVTIMEO failed: errno=%d, strerror=\"%s\"",
                errno, strerror(errno));
@@ -125,7 +124,8 @@ static int parse_hp_resp_json(const char *buf, const size_t buf_size, headphone_
     return 0;
 }
 
-static int discover_headphones(const discovery_server_t *server, headphone_response_t *devices, const int max_devices) {
+static int discover_headphones(const discovery_server_t *server, headphone_response_t *devices, 
+                               const int max_devices, const int duration) {
     char buffer[BUFFER_SIZE];
     int device_count = 0;
 
@@ -145,7 +145,7 @@ static int discover_headphones(const discovery_server_t *server, headphone_respo
     syslog(LOG_INFO, "Discovery request sent. Listening for responses...");
     
     time_t start_time = time(NULL);
-    while ((time(NULL) - start_time) < DISCOVERY_TIMEOUT && device_count < max_devices) {
+    while ((time(NULL) - start_time) < duration && device_count < max_devices) {
         struct sockaddr_in sender_addr;
         socklen_t addr_len = sizeof(sender_addr);
         ssize_t recv_len;
@@ -184,7 +184,7 @@ void discovery_data_destroy(discovery_data_t *data) {
     data->is_discovering = false;
 }
 
-int discover_task(discovery_data_t *data) {
+int discover_task(discovery_data_t *data, const int duration) {
     if (data->is_discovering) {
         syslog(LOG_WARNING, "Cannot start new discovery server while previous did not stop");
         return -1;
@@ -205,7 +205,7 @@ int discover_task(discovery_data_t *data) {
         return -1;
     }
 
-    data->count = discover_headphones(&server, hps, 16);
+    data->count = discover_headphones(&server, hps, 16, duration);
     memcpy(data->data, hps, data->count * sizeof(headphone_response_t));
     data->is_discovering = false;
 

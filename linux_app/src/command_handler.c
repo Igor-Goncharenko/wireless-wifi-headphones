@@ -4,10 +4,59 @@
 #include <unistd.h>
 #include <stdio.h>
 #include <syslog.h>
-#include <string.h>
 #include <stdlib.h>
 
+#include <cJSON.h>
+
 #include "discovery.h"
+
+static void parse_discovery_command(cJSON *data, discovery_command_data_t *out) {
+    if (data == NULL) {
+        out->duration = DEFAULT_DISCOVERY_DURATION;
+        return;
+    }
+
+    cJSON *duration = cJSON_GetObjectItemCaseSensitive(data, "duration");
+    if (cJSON_IsNumber(duration) && duration->valueint > 0 && duration->valueint <= MAX_DISCOVERY_DURATION) {
+        out->duration = duration->valueint;
+    } else {
+        syslog(LOG_WARNING, "Got incorrect data in discovery command");
+        out->duration = DEFAULT_DISCOVERY_DURATION;
+    }
+}
+
+static int parse_command(const char *command_json, command_t *cmd) {
+    cJSON *root = cJSON_Parse(command_json);
+    if (root == NULL) {
+        const char *error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr != NULL) {
+            syslog(LOG_ERR, "JSON parse error: %s\n", error_ptr);
+        }
+        return -1;
+    }
+
+    cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
+    if (cJSON_IsNumber(type) && type->valueint >= 0 && type->valueint <= COMMAND_TYPE_LAST) {
+        cmd->type = (command_type_e)type->valueint;
+    } else {
+        cmd->type = COMMAND_UNKNOWN;
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+
+    switch (cmd->type) {
+        case COMMAND_DISCOVERY:
+            parse_discovery_command(data, &cmd->discovery);
+            break;
+        default:
+            break;
+    }
+
+    cJSON_Delete(root);
+    return 0;
+}
 
 static void send_discovery_data(const int client_fd, discovery_data_t *data) {
     char buffer[256];
@@ -33,8 +82,8 @@ static void send_discovery_data(const int client_fd, discovery_data_t *data) {
     pthread_mutex_unlock(&data->mutex);
 }
 
-static int discover_and_send_data(const int client_fd, discovery_data_t *data) {
-    if (discover_task(data) != 0) {
+static int discover_and_send_data(const int client_fd, discovery_data_t *data, const int duration) {
+    if (discover_task(data, duration) != 0) {
         syslog(LOG_ERR, "Failed to discover headphones");
         return -1;
     }
@@ -46,16 +95,30 @@ static int discover_and_send_data(const int client_fd, discovery_data_t *data) {
 
 void *process_command_task(void *arg) {
     process_command_arg_t *pc_arg = (process_command_arg_t*) arg;
+    command_t command;
 
-    if (strcmp(pc_arg->command, "STATUS") == 0) {
-        const char *response = "Daemon is working\n";
-        write(pc_arg->client_fd, response, strlen(response));
-    } else if (strcmp(pc_arg->command, "DISCOVERY") == 0) {
-        discover_and_send_data(pc_arg->client_fd, pc_arg->data_ptr);
-    } else if (strcmp(pc_arg->command, "DISCOVERY_DATA") == 0) {
-        send_discovery_data(pc_arg->client_fd, pc_arg->data_ptr);
-    } else {
-        syslog(LOG_WARNING, "Unknown command %s", pc_arg->command);
+    if (parse_command(pc_arg->command, &command) != 0) {
+        syslog(LOG_ERR, "Failed to parse command");
+        close(pc_arg->client_fd);
+        free(arg);
+        return NULL;
+    }
+
+    const char STATUS_RESP[] = "Daemon is working\n";
+
+    switch (command.type) {
+        case COMMAND_STATUS:
+            write(pc_arg->client_fd, STATUS_RESP, sizeof(STATUS_RESP) - 1);
+            break;
+        case COMMAND_DISCOVERY:
+            discover_and_send_data(pc_arg->client_fd, pc_arg->data_ptr, command.discovery.duration);
+            break;
+        case COMMAND_DISCOVERY_DATA:
+            send_discovery_data(pc_arg->client_fd, pc_arg->data_ptr);
+            break;
+        case COMMAND_UNKNOWN:
+            syslog(LOG_WARNING, "Got COMMAND_UNKNOWN");
+            break;
     }
 
     close(pc_arg->client_fd);

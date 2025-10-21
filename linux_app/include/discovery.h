@@ -8,6 +8,7 @@
 #include <netinet/in.h>
 
 #define MAX_HEADPHONES_RESPS 16
+#define MAX_DISCOVERY_DURATION 10
 
 typedef struct {
     int sockfd;
@@ -31,6 +32,6 @@ typedef struct {
 
 int discovery_data_init(discovery_data_t *data);
 void discovery_data_destroy(discovery_data_t *data);
-int discover_task(discovery_data_t *data);
+int discover_task(discovery_data_t *data, const int duration);
 
 #endif /* WIFI_H */

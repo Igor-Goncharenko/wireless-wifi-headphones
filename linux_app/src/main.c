@@ -135,19 +135,14 @@ void signal_handler(int sig) {
     }
 }
 
-int discover(const int client_fd, discovery_data_t *data) {
+void send_discovery_data(const int client_fd, discovery_data_t *data) {
     char buffer[256];
     int size;
-
-    if (discover_task(data) != 0) {
-        syslog(LOG_ERR, "Failed to discover headphones");
-        return -1;
-    }
 
     pthread_mutex_lock(&data->mutex);
     
     if (data->count > 0) {
-        size = sprintf(buffer, "Discovery finished, devices=%d\n", data->count);
+        size = sprintf(buffer, "devices=%d\n:", data->count);
         write(client_fd, buffer, size);
 
         for (int i = 0; i < data->count; i++) {
@@ -157,11 +152,20 @@ int discover(const int client_fd, discovery_data_t *data) {
             write(client_fd, buffer, size);
         }
     } else {
-        const char response[] = "Discovery finished, nothing found\n";
+        const char response[] = "No devices found\n";
         write(client_fd, response, sizeof(response) - 1);
     }
 
     pthread_mutex_unlock(&data->mutex);
+}
+
+int discover_and_send_data(const int client_fd, discovery_data_t *data) {
+    if (discover_task(data) != 0) {
+        syslog(LOG_ERR, "Failed to discover headphones");
+        return -1;
+    }
+
+    send_discovery_data(client_fd, data);
 
     return 0;
 }
@@ -173,7 +177,9 @@ void *process_command_task(void *arg) {
         const char *response = "Daemon is working\n";
         write(pc_arg->client_fd, response, strlen(response));
     } else if (strcmp(pc_arg->command, "DISCOVERY") == 0) {
-        discover(pc_arg->client_fd, pc_arg->data_ptr);
+        discover_and_send_data(pc_arg->client_fd, pc_arg->data_ptr);
+    } else if (strcmp(pc_arg->command, "DISCOVERY_DATA") == 0) {
+        send_discovery_data(pc_arg->client_fd, pc_arg->data_ptr);
     } else {
         syslog(LOG_WARNING, "Unknown command %s", pc_arg->command);
     }

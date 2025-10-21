@@ -15,16 +15,21 @@
 
 #define RINGBUF_READ_TIMEOUT_MS 1000
 
+void ringbuf_cleanup(ringbuf_t *rb) {
+    pthread_mutex_lock(&rb->mutex);
+
+    rb->read_pos = 0;
+    rb->write_pos = 0;
+    rb->available = rb->size;
+
+    pthread_mutex_unlock(&rb->mutex);
+}
+
 int ringbuf_init(ringbuf_t *rb, size_t size) {
     if ((rb->buf = malloc(size)) == NULL) {
         syslog(LOG_ERR, "Failed to allocate memory for ring buffer");
         return -1;
     }
-
-    rb->size = size;
-    rb->read_pos = 0;
-    rb->write_pos = 0;
-    rb->available = size;
 
     if (pthread_mutex_init(&rb->mutex, NULL) != 0) {
         syslog(LOG_ERR, "Failed to init pthread mutex: errno=%d, strerror=\"%s\"",
@@ -40,6 +45,9 @@ int ringbuf_init(ringbuf_t *rb, size_t size) {
         free(rb->buf);
         return -1;
     }
+
+    rb->size = size;
+    ringbuf_cleanup(rb);
 
     return 0;
 }

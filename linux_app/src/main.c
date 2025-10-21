@@ -11,15 +11,14 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include "audio.h"
+#include "command_handler.h"
 #include "discovery.h"
 #include "ringbuf.h"
 #include "rtp_client.h"
-#include "command_handler.h"
 
 #define SOCKET_PATH "/tmp/" CONFIG_DAEMON_NAME ".sock"
 #define LOGFILE_PATH "/tmp/" CONFIG_DAEMON_NAME ".log"
-
-#define RINGBUF_SIZE (1024 * 128)
 
 static volatile sig_atomic_t keep_running = 1;
 static FILE *logfile = NULL;
@@ -132,9 +131,9 @@ void signal_handler(int sig) {
 
 int main(void) {
     int ret;
-    ringbuf_t rb;
-    discovery_data_t discovery_data;
-    rtp_connection_data_t connection_data;
+    discovery_data_t discovery_data = { 0 };
+    rtp_connection_data_t connection_data = { 0 };
+    pulse_audio_t pulse = { 0 };
 
     ret = daemon_init();
     if (ret == 1) {
@@ -155,6 +154,12 @@ int main(void) {
     sigaction(SIGTERM, &sa, NULL);
     sigaction(SIGINT, &sa, NULL);
 
+    if (audio_init(&pulse) != 0) {
+        syslog(LOG_ERR, "Failed to init audio");
+        audio_destroy(&pulse);
+        return -1;
+    }
+
     const int sockfd = create_socket();
     if (sockfd < 0) {
         syslog(LOG_ERR, "Failed to create socket");
@@ -163,28 +168,20 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    if (ringbuf_init(&rb, RINGBUF_SIZE) != 0) {
-        syslog(LOG_ERR, "Failed to init ring buffer");
-        daemon_cleanup();
-        close_socket(sockfd);
-        closelog();
-        return EXIT_FAILURE;
-    }
-
     if (discovery_data_init(&discovery_data) != 0) {
         syslog(LOG_ERR, "Failed to init discovery data");
         daemon_cleanup();
+        audio_destroy(&pulse);
         close_socket(sockfd);
-        ringbuf_destroy(&rb);
         closelog();
         return EXIT_FAILURE;
     }
 
-    if (rtp_connection_data_init(&connection_data, &rb) != 0) {
+    if (rtp_connection_data_init(&connection_data, &pulse.audio_buf) != 0) {
         syslog(LOG_ERR, "Failed to init connection  data");
         daemon_cleanup();
+        audio_destroy(&pulse);
         close_socket(sockfd);
-        ringbuf_destroy(&rb);
         discovery_data_destroy(&discovery_data);
         closelog();
         return EXIT_FAILURE;
@@ -229,8 +226,8 @@ int main(void) {
 
     syslog(LOG_INFO, "Shutting down gracefully...");
     daemon_cleanup();
+    audio_destroy(&pulse);
     close_socket(sockfd);
-    ringbuf_destroy(&rb);
     discovery_data_destroy(&discovery_data);
     rtp_connection_data_destroy(&connection_data);
     closelog();

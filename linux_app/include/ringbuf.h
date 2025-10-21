@@ -15,6 +15,8 @@ typedef struct {
     pthread_cond_t cond;
 } ringbuf_t;
 
+void ringbuf_cleanup(ringbuf_t *rb);
+
 int ringbuf_init(ringbuf_t *rb, size_t size);
 
 void ringbuf_destroy(ringbuf_t *rb);

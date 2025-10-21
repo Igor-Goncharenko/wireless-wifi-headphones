@@ -134,6 +134,8 @@ int rtp_connection_start(rtp_connection_data_t *data, const char *ip4) {
         return -1;
     }
 
+    ringbuf_cleanup(data->rb_ptr);
+
     if (pthread_create(&data->tid, NULL, rtp_sender_task, data) != 0) {
         syslog(LOG_ERR, "Failed to create thread for rtp_sender_task");
         rtp_session_destroy(&data->active_session);

@@ -13,10 +13,13 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
+#include <cJSON.h>
+
 #define MULTICAST_GROUP "224.1.1.1"
 #define DISCOVERY_PORT 5000
 #define DISCOVERY_TIMEOUT 5
 #define BUFFER_SIZE 1024
+#define DISCOVERY_REQUEST "DISCOVER_HEADPHONES_REQUEST"
 
 static int discovery_server_init(discovery_server_t *server) {
     if ((server->sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
@@ -56,6 +59,13 @@ static int discovery_server_init(discovery_server_t *server) {
         perror("setsockopt SO_RCVTIMEO failed");
     }
 
+    unsigned char loopback = 0;
+    if (setsockopt(server->sockfd, IPPROTO_IP, IP_MULTICAST_LOOP, 
+                &loopback, sizeof(loopback)) < 0) {
+        perror("setsockopt IP_MULTICAST_LOOP");
+        return -1;
+    }
+
     return 0;
 }
 
@@ -70,6 +80,46 @@ static void discovery_server_destroy(discovery_server_t *server) {
     }
 }
 
+static int parse_hp_resp_json(const char *buf, const size_t buf_size, headphone_response_t *resp) {
+    cJSON *root = cJSON_ParseWithLength(buf, buf_size);
+    if (root == NULL) {
+        const char *error_ptr = cJSON_GetErrorPtr();
+        if (error_ptr != NULL) {
+            syslog(LOG_ERR, "JSON parse error: %s\n", error_ptr);
+        }
+        return -1;
+    }
+
+    cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
+    cJSON *model = cJSON_GetObjectItemCaseSensitive(root, "model");
+    cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "id");
+    cJSON *ip = cJSON_GetObjectItemCaseSensitive(root, "ip");
+
+    if (cJSON_IsString(type) && cJSON_IsString(model) && 
+        cJSON_IsString(id) && cJSON_IsString(ip)) {
+        
+        strncpy(resp->type, type->valuestring, sizeof(resp->type) - 1);
+        resp->type[sizeof(resp->type) - 1] = '\0';
+        
+        strncpy(resp->model, model->valuestring, sizeof(resp->model) - 1);
+        resp->model[sizeof(resp->model) - 1] = '\0';
+        
+        strncpy(resp->id, id->valuestring, sizeof(resp->id) - 1);
+        resp->id[sizeof(resp->id) - 1] = '\0';
+        
+        strncpy(resp->ip_v4, ip->valuestring, sizeof(resp->ip_v4) - 1);
+        resp->ip_v4[sizeof(resp->ip_v4) - 1] = '\0';
+    }
+    else {
+        syslog(LOG_ERR,"Missing or invalid fields in JSON\n"); 
+        cJSON_Delete(root);
+        return -1;
+    }
+
+    cJSON_Delete(root);
+    return 0;
+}
+
 static int discover_headphones(const discovery_server_t *server, headphone_response_t *devices, const int max_devices) {
     char buffer[BUFFER_SIZE];
     int device_count = 0;
@@ -80,8 +130,7 @@ static int discover_headphones(const discovery_server_t *server, headphone_respo
     multicast_addr.sin_addr.s_addr = inet_addr(MULTICAST_GROUP);
     multicast_addr.sin_port = htons(DISCOVERY_PORT);
     
-    const char discovery_msg[] = "DISCOVER_HEADPHONES_REQUEST";
-    if (sendto(server->sockfd, discovery_msg, sizeof(discovery_msg) - 1, 0,
+    if (sendto(server->sockfd, DISCOVERY_REQUEST, sizeof(DISCOVERY_REQUEST) - 1, 0,
                (struct sockaddr*)&multicast_addr, sizeof(multicast_addr)) < 0) {
         perror("sendto failed");
         return -1;
@@ -90,31 +139,18 @@ static int discover_headphones(const discovery_server_t *server, headphone_respo
     printf("Discovery request sent. Listening for responses...\n");
     
     time_t start_time = time(NULL);
-    while ((time(NULL) - start_time) < DISCOVERY_TIMEOUT) {
+    while ((time(NULL) - start_time) < DISCOVERY_TIMEOUT && device_count < max_devices) {
         struct sockaddr_in sender_addr;
         socklen_t addr_len = sizeof(sender_addr);
         ssize_t recv_len;
         
         recv_len = recvfrom(server->sockfd, buffer, BUFFER_SIZE - 1, 0,
                            (struct sockaddr*)&sender_addr, &addr_len);
-        
+
         if (recv_len > 0) {
             buffer[recv_len] = '\0';
-            
-            char *type = strstr(buffer, "\"type\":");
-            char *model = strstr(buffer, "\"model\":");
-            char *id = strstr(buffer, "\"id\":");
-            char *ip = strstr(buffer, "\"ip\":");
-            
-            if (type && model && id && ip) {
-                sscanf(type, "\"type\":\"%31[^\"]", devices[device_count].type);
-                sscanf(model, "\"model\":\"%63[^\"]", devices[device_count].model);
-                sscanf(id, "\"id\":\"%31[^\"]", devices[device_count].id);
-                sscanf(ip, "\"ip\":\"%15[^\"]", devices[device_count].ip_v4);
-                
+            if (parse_hp_resp_json(buffer, recv_len, &devices[device_count]) == 0) {
                 device_count++;
-                
-                if (device_count >= max_devices) break;
             }
         }
     }

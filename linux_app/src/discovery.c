@@ -135,6 +135,8 @@ int discovery_data_init(discovery_data_t *data) {
 }
 
 void discovery_data_destroy(discovery_data_t *data) {
+    pthread_mutex_lock(&data->mutex);
+    pthread_mutex_unlock(&data->mutex);
     pthread_mutex_destroy(&data->mutex);
     data->count = 0;
     data->is_discovering = false;
@@ -157,6 +159,7 @@ int discover_task(discovery_data_t *data) {
         syslog(LOG_ERR, "Failed to init discovery server. errno=%d, strerror=%s\n",
                errno, strerror(errno));
         discovery_server_destroy(&server);
+        pthread_mutex_unlock(&data->mutex);
         return -1;
     }
 

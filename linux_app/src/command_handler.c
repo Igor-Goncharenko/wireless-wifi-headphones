@@ -1,6 +1,7 @@
 #include "command_handler.h"
 
 #include <pthread.h>
+#include <string.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <syslog.h>
@@ -17,7 +18,8 @@ static void parse_discovery_command(cJSON *data, discovery_command_data_t *out) 
     }
 
     cJSON *duration = cJSON_GetObjectItemCaseSensitive(data, "duration");
-    if (cJSON_IsNumber(duration) && duration->valueint > 0 && duration->valueint <= MAX_DISCOVERY_DURATION) {
+    if (duration != NULL && cJSON_IsNumber(duration) && duration->valueint > 0 && 
+        duration->valueint <= MAX_DISCOVERY_DURATION) {
         out->duration = duration->valueint;
     } else {
         syslog(LOG_WARNING, "Got incorrect data in discovery command");
@@ -25,12 +27,32 @@ static void parse_discovery_command(cJSON *data, discovery_command_data_t *out) 
     }
 }
 
+static int parse_connect_command(cJSON *data, connect_command_data_t *out) {
+    if (data == NULL) {
+        syslog(LOG_WARNING, "Got NULL data in connect command");
+        return -1;
+    }
+
+    cJSON *ip4 = cJSON_GetObjectItemCaseSensitive(data, "ip4");
+    if (ip4 != NULL && cJSON_IsString(ip4)) {
+        const size_t ip4_len = strlen(ip4->valuestring);
+        const size_t cpy_len = (sizeof(out->ip4) - 1) > ip4_len ? ip4_len : sizeof(out->ip4) - 1;
+        strncpy(out->ip4, ip4->valuestring, cpy_len);
+        out->ip4[cpy_len] = '\0';
+    } else {
+        syslog(LOG_WARNING, "Got incorrect data in connect command");
+        return -1;
+    }
+
+    return 0;
+}
+
 static int parse_command(const char *command_json, command_t *cmd) {
     cJSON *root = cJSON_Parse(command_json);
     if (root == NULL) {
         const char *error_ptr = cJSON_GetErrorPtr();
         if (error_ptr != NULL) {
-            syslog(LOG_ERR, "JSON parse error: %s\n", error_ptr);
+            syslog(LOG_ERR, "JSON parse error: %s", error_ptr);
         }
         return -1;
     }
@@ -45,13 +67,24 @@ static int parse_command(const char *command_json, command_t *cmd) {
     }
 
     cJSON *data = cJSON_GetObjectItemCaseSensitive(root, "data");
+    int ret = 0;
 
     switch (cmd->type) {
         case COMMAND_DISCOVERY:
             parse_discovery_command(data, &cmd->discovery);
             break;
+        case COMMAND_DISCONNECT:
+        case COMMAND_CONNECT:
+            ret = parse_connect_command(data, &cmd->connect);
+            break;
         default:
             break;
+    }
+    
+    if (ret != 0) {
+        cJSON_Delete(root);
+        syslog(LOG_ERR, "Failed to parse command data");
+        return -1;
     }
 
     cJSON_Delete(root);
@@ -93,6 +126,16 @@ static int discover_and_send_data(const int client_fd, discovery_data_t *data, c
     return 0;
 }
 
+static int connect_device(const char *ip4) {
+    syslog(LOG_INFO, "Connecting to device with ip=%s", ip4);
+    return 0;
+}
+
+static int disconnect_device(const char *ip4) {
+    syslog(LOG_INFO, "Disconnecting from device with ip=%s", ip4);
+    return 0;
+}
+
 void *process_command_task(void *arg) {
     process_command_arg_t *pc_arg = (process_command_arg_t*) arg;
     command_t command;
@@ -115,6 +158,12 @@ void *process_command_task(void *arg) {
             break;
         case COMMAND_DISCOVERY_DATA:
             send_discovery_data(pc_arg->client_fd, pc_arg->data_ptr);
+            break;
+        case COMMAND_CONNECT:
+            connect_device(command.connect.ip4);
+            break;
+        case COMMAND_DISCONNECT:
+            disconnect_device(command.connect.ip4);
             break;
         case COMMAND_UNKNOWN:
             syslog(LOG_WARNING, "Got COMMAND_UNKNOWN");

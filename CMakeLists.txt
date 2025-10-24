@@ -14,3 +14,4 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON CACHE BOOL "Position independent code")
 add_subdirectory(libs/cjson)
 
 add_subdirectory(linux_app)
+add_subdirectory(cli)

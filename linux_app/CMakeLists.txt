@@ -28,6 +28,7 @@ target_link_libraries(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
         cjson
+        wh_daemon_commands
 )
 
 target_include_directories(${PROJECT_NAME}
@@ -35,6 +36,7 @@ target_include_directories(${PROJECT_NAME}
         include
         ${LIBPULSE_INCLUDE_DIRS}
         ${CMAKE_SOURCE_DIR}/libs/cjson
+        ${CMAKE_SOURCE_DIR}/libs/wh_daemon_commands
 )
 
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)

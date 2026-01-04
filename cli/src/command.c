@@ -5,13 +5,13 @@
 
 #include <cJSON.h>
 
+#include "wh_daemon_commands.h"
+
 static int _status_cb(const char *cmd_raw, command_t *cmd);
 static int _discovery_cb(const char *cmd_raw, command_t *cmd);
 static int _discovery_data_cb(const char *cmd_raw, command_t *cmd);
 static int _connect_cb(const char *cmd_raw, command_t *cmd);
 static int _disconnect_cb(const char *cmd_raw, command_t *cmd);
-
-static char *_command_to_string(const command_t *cmd);
 
 static const cli_command_t COMMANDS[COMMAND_TYPE_LAST + 1] = {
     [COMMAND_STATUS] = {
@@ -43,7 +43,7 @@ char *process_command(const char *cmd_str) {
         if (strncmp(COMMANDS[i].cmd, cmd_str, len) == 0 && (after_cmd == ' ' || after_cmd == '\0')) {
             command_t cmd;
             COMMANDS[i].cb(cmd_str, &cmd);
-            return _command_to_string(&cmd);
+            return command_to_string(&cmd);
         }
     }
     return NULL;
@@ -88,35 +88,4 @@ static int _disconnect_cb(const char *cmd_raw, command_t *cmd) {
 
     ret = sscanf(cmd_raw, "disconnect %15s", cmd->connect.ip4);
     return (ret == 1) ? 0 : -1;
-}
-
-static char *_command_to_string(const command_t *cmd) {
-    if (cmd->type == COMMAND_UNKNOWN) return NULL;
-
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "type", cmd->type);
-
-    if (cmd->type == COMMAND_DISCOVERY || cmd->type == COMMAND_CONNECT ||
-        cmd->type == COMMAND_DISCONNECT) {
-        cJSON *data = cJSON_CreateObject();
-
-        switch (cmd->type) {
-            case COMMAND_DISCOVERY:
-                cJSON_AddNumberToObject(data, "duration", cmd->discovery.duration);
-                break;
-            case COMMAND_CONNECT:
-            case COMMAND_DISCONNECT:
-                cJSON_AddStringToObject(data, "ip", cmd->connect.ip4);
-                break;
-            default:
-                break;
-        }
-
-        cJSON_AddItemToObject(root, "data", data);
-    }
-
-    char *json_str = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-
-    return json_str;
 }

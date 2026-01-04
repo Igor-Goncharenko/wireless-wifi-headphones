@@ -8,7 +8,6 @@ target_compile_options(${PROJECT_NAME}
     PRIVATE
         -Wall
         -g
-        ${LIBPULSE_CFLAGS_OTHER}
 )
 
 target_link_libraries(${PROJECT_NAME}
@@ -19,12 +18,14 @@ target_link_libraries(${PROJECT_NAME}
 target_link_libraries(${PROJECT_NAME}
     PRIVATE
         cjson
+        wh_daemon_commands
 )
 
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         include
         ${CMAKE_SOURCE_DIR}/libs/cjson
+        ${CMAKE_SOURCE_DIR}/libs/wh_daemon_commands
 )
 
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)

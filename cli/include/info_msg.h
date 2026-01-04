@@ -3,7 +3,7 @@
 
 const char HELLO_MSG[] =
 "===============================================\n"
-"          Bluetooth Audio Manager CLI          \n"
+"          Wifi Headphones Manager CLI          \n"
 "===============================================\n"
 " Welcome! This tool allows you to manage the   \n"
 " connection to your wireless wifi headphones.  \n"

@@ -1,5 +1,5 @@
-#ifndef INFO_H
-#define INFO_H
+#ifndef INFO_MSG_H
+#define INFO_MSG_H
 
 const char HELLO_MSG[] =
 "===============================================\n"
@@ -9,9 +9,18 @@ const char HELLO_MSG[] =
 " connection to your wireless wifi headphones.  \n"
 "                                               \n"
 " Use 'help' or '?' to view available commands. \n"
+" Use 'exit' to exit the program.               \n"
 "===============================================\n";
 
 const char EXIT_MSG[] =
-"Exiting from wifi headphones cli.\n";
+"Exiting from wifi headphones cli.              \n";
 
-#endif /* INFO_H */
+const char HELP_MSG[] =
+"There are 6 commands available:                \n"
+"  - status                                     \n"
+"  - discovery <duration:opt>                   \n"
+"  - discovery_data                             \n"
+"  - connect <ip:req>                           \n"
+"  - disconnect <ip:req>                        \n";
+
+#endif /* INFO_MSG_H */

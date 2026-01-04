@@ -10,16 +10,14 @@
 #include "command.h"
 #include "info_msg.h"
 
-#define MAX_COMMAND_LEN 256
 #define SOCKET_PATH "/tmp/wifi_headphones_daemon.sock"
 
 static volatile sig_atomic_t s_keep_running = 1;
 
-void signal_handler(int sig) {
+static void signal_handler(int sig) {
     switch (sig) {
         case SIGTERM:
         case SIGINT:
-            printf("\n%s", EXIT_MSG);
             s_keep_running = 0;
             break;
         default:
@@ -27,8 +25,16 @@ void signal_handler(int sig) {
     }
 }
 
+void init_signal_handler(void) {
+    struct sigaction sa;
+    sa.sa_handler = signal_handler;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_flags = 0;
+    sigaction(SIGTERM, &sa, NULL);
+    sigaction(SIGINT, &sa, NULL);
+}
+
 int send_command_to_daemon(const char *command) {
-    printf("command=\"%s\"\n", command);
     int sock = 0;
     struct sockaddr_un addr;
 
@@ -66,33 +72,51 @@ int send_command_to_daemon(const char *command) {
     return 0;
 }
 
+int process_cli_command(const char *cmd) {
+    if (strcmp(cmd, "exit") == 0) {
+        return 1;
+    } else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0) {
+        fputs(HELP_MSG, stdout);
+        return 0;
+    } else {
+        char *command = process_command(cmd);
+        // printf("cmd='%s'; resp='%s'\n", cmd, command);
+        if (command) {
+            send_command_to_daemon(command);
+            free(command);
+        }
+        return 0;
+    }
+}
+
 int main(void) {
-    char cmd_buf[MAX_COMMAND_LEN];
+    init_signal_handler();
 
-    struct sigaction sa;
-    sa.sa_handler = signal_handler;
-    sigemptyset(&sa.sa_mask);
-    sa.sa_flags = 0;
-    sigaction(SIGTERM, &sa, NULL);
-    sigaction(SIGINT, &sa, NULL);
+    char *cmd_buf = NULL;
+    size_t cmd_buf_size = 0;
 
-    printf("%s", HELLO_MSG);
+    fputs(HELLO_MSG, stdout);
 
     while (s_keep_running) {
-        printf("> ");
-        if (fgets(cmd_buf, sizeof(cmd_buf), stdin) != NULL) {
+        fputs(">>> ", stdout);
+
+        if (getline(&cmd_buf, &cmd_buf_size, stdin) != -1) {
             size_t len = strlen(cmd_buf);
             if (len > 0 && cmd_buf[len - 1] == '\n') {
                 cmd_buf[len - 1] = '\0';
+            } else {
+                continue;
             }
-            char *command = process_command(cmd_buf);
-            printf("cmd='%s'; resp='%s'\n", cmd_buf, command);
-            if (command) {
-                send_command_to_daemon(command);
-                free(command);
-            }
+
+            if (process_cli_command(cmd_buf))
+                break;
         }
     }
+
+    if (cmd_buf != NULL)
+        free(cmd_buf);
+
+    fputs(EXIT_MSG, stdout);
 
     return EXIT_SUCCESS;
 }

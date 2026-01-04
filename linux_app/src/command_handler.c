@@ -6,8 +6,6 @@
 #include <syslog.h>
 #include <stdlib.h>
 
-#include <cJSON.h>
-
 #include "discovery.h"
 #include "rtp_client.h"
 
@@ -65,9 +63,9 @@ static int disconnect_device(rtp_connection_data_t *conn_data) {
 
 void *process_command_task(void *arg) {
     process_command_arg_t *pc_arg = (process_command_arg_t*) arg;
-    command_t command;
+    daemon_cmd_t cmd;
 
-    if (parse_command(pc_arg->command, &command) != 0) {
+    if (daemon_cmd_parse(pc_arg->command, &cmd) != 0) {
         syslog(LOG_ERR, "Failed to parse command");
         close(pc_arg->client_fd);
         free(arg);
@@ -76,24 +74,24 @@ void *process_command_task(void *arg) {
 
     const char STATUS_RESP[] = "Daemon is working\n";
 
-    switch (command.type) {
-        case COMMAND_STATUS:
+    switch (cmd.type) {
+        case DAEMON_CMD_STATUS:
             write(pc_arg->client_fd, STATUS_RESP, sizeof(STATUS_RESP) - 1);
             break;
-        case COMMAND_DISCOVERY:
-            discover_and_send_data(pc_arg->client_fd, pc_arg->disc_data, command.discovery.duration);
+        case DAEMON_CMD_DISCOVERY:
+            discover_and_send_data(pc_arg->client_fd, pc_arg->disc_data, cmd.discovery.duration);
             break;
-        case COMMAND_DISCOVERY_DATA:
+        case DAEMON_CMD_DISCOVERY_DATA:
             send_discovery_data(pc_arg->client_fd, pc_arg->disc_data);
             break;
-        case COMMAND_CONNECT:
-            connect_device(pc_arg->conn_data, command.connect.ip4);
+        case DAEMON_CMD_CONNECT:
+            connect_device(pc_arg->conn_data, cmd.connect.ip4);
             break;
-        case COMMAND_DISCONNECT:
+        case DAEMON_CMD_DISCONNECT:
             disconnect_device(pc_arg->conn_data);
             break;
-        case COMMAND_UNKNOWN:
-            syslog(LOG_WARNING, "Got COMMAND_UNKNOWN");
+        case DAEMON_CMD_UNKNOWN:
+            syslog(LOG_WARNING, "Got DAEMON_CMD_UNKNOWN");
             break;
     }
 

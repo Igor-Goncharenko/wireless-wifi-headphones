@@ -3,34 +3,34 @@
 
 #define DEFAULT_DISCOVERY_DURATION 5
 
-#define COMMAND_TYPE_LAST COMMAND_DISCONNECT
+#define DAEMON_CMD_TYPE_LAST DAEMON_CMD_DISCONNECT
 typedef enum {
-    COMMAND_UNKNOWN = -1,
-    COMMAND_STATUS = 0,
-    COMMAND_DISCOVERY,
-    COMMAND_DISCOVERY_DATA,
-    COMMAND_CONNECT,
-    COMMAND_DISCONNECT,
-} command_type_e;
+    DAEMON_CMD_UNKNOWN = -1,
+    DAEMON_CMD_STATUS = 0,
+    DAEMON_CMD_DISCOVERY,
+    DAEMON_CMD_DISCOVERY_DATA,
+    DAEMON_CMD_CONNECT,
+    DAEMON_CMD_DISCONNECT,
+} daemon_cmd_type_e;
 
 typedef struct {
     int duration;
-} discovery_command_data_t;
+} daemon_cmd_discovery_t;
 
 typedef struct {
     char ip4[16];
-} connect_command_data_t;
+} daemon_cmd_connect_t;
 
 typedef struct {
-    command_type_e type;
+    daemon_cmd_type_e type;
     union {
-        discovery_command_data_t discovery;
-        connect_command_data_t connect;
+        daemon_cmd_discovery_t discovery;
+        daemon_cmd_connect_t connect;
     };
-} command_t;
+} daemon_cmd_t;
 
-char *command_to_string(const command_t *cmd);
+char *daemon_cmd_to_string(const daemon_cmd_t *cmd);
 
-int parse_command(const char *command_json, command_t *cmd);
+int daemon_cmd_parse(const char *command_json, daemon_cmd_t *cmd);
 
 #endif /* WH_DAEMON_COMMANDS_H */

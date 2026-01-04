@@ -6,7 +6,7 @@
 
 #include "wh_daemon_commands.h"
 
-typedef int (*cli_command_cb)(const char *cmd_raw, command_t *cmd);
+typedef int (*cli_command_cb)(const char *cmd_raw, daemon_cmd_t *cmd);
 
 typedef struct {
     char cmd[CLI_CMD_MAX_LEN];

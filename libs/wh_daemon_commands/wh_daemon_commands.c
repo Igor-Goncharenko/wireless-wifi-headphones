@@ -6,38 +6,7 @@
 
 #define MAX_DISCOVERY_DURATION 10
 
-char *command_to_string(const command_t *cmd) {
-    if (cmd->type == COMMAND_UNKNOWN) return NULL;
-
-    cJSON *root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "type", cmd->type);
-
-    if (cmd->type == COMMAND_DISCOVERY || cmd->type == COMMAND_CONNECT ||
-        cmd->type == COMMAND_DISCONNECT) {
-        cJSON *data = cJSON_CreateObject();
-
-        switch (cmd->type) {
-            case COMMAND_DISCOVERY:
-                cJSON_AddNumberToObject(data, "duration", cmd->discovery.duration);
-                break;
-            case COMMAND_CONNECT:
-            case COMMAND_DISCONNECT:
-                cJSON_AddStringToObject(data, "ip", cmd->connect.ip4);
-                break;
-            default:
-                break;
-        }
-
-        cJSON_AddItemToObject(root, "data", data);
-    }
-
-    char *json_str = cJSON_PrintUnformatted(root);
-    cJSON_Delete(root);
-
-    return json_str;
-}
-
-static void parse_discovery_command(cJSON *data, discovery_command_data_t *out) {
+static void _daemon_command_parse_discovery(cJSON *data, daemon_cmd_discovery_t *out) {
     if (data == NULL) {
         out->duration = DEFAULT_DISCOVERY_DURATION;
         return;
@@ -53,7 +22,7 @@ static void parse_discovery_command(cJSON *data, discovery_command_data_t *out) 
     }
 }
 
-static int parse_connect_command(cJSON *data, connect_command_data_t *out) {
+static int _daemon_cmd_parse_connect(cJSON *data, daemon_cmd_connect_t *out) {
     if (data == NULL) {
         // syslog(LOG_WARNING, "Got NULL data in connect command");
         return -1;
@@ -73,7 +42,7 @@ static int parse_connect_command(cJSON *data, connect_command_data_t *out) {
     return 0;
 }
 
-int parse_command(const char *command_json, command_t *cmd) {
+int daemon_cmd_parse(const char *command_json, daemon_cmd_t *cmd) {
     cJSON *root = cJSON_Parse(command_json);
     if (root == NULL) {
         const char *error_ptr = cJSON_GetErrorPtr();
@@ -84,10 +53,10 @@ int parse_command(const char *command_json, command_t *cmd) {
     }
 
     cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
-    if (cJSON_IsNumber(type) && type->valueint >= 0 && type->valueint <= COMMAND_TYPE_LAST) {
-        cmd->type = (command_type_e)type->valueint;
+    if (cJSON_IsNumber(type) && type->valueint >= 0 && type->valueint <= DAEMON_CMD_TYPE_LAST) {
+        cmd->type = (daemon_cmd_type_e)type->valueint;
     } else {
-        cmd->type = COMMAND_UNKNOWN;
+        cmd->type = DAEMON_CMD_UNKNOWN;
         cJSON_Delete(root);
         return -1;
     }
@@ -96,12 +65,12 @@ int parse_command(const char *command_json, command_t *cmd) {
     int ret = 0;
 
     switch (cmd->type) {
-        case COMMAND_DISCOVERY:
-            parse_discovery_command(data, &cmd->discovery);
+        case DAEMON_CMD_DISCOVERY:
+            _daemon_command_parse_discovery(data, &cmd->discovery);
             break;
-        case COMMAND_DISCONNECT:
-        case COMMAND_CONNECT:
-            ret = parse_connect_command(data, &cmd->connect);
+        case DAEMON_CMD_DISCONNECT:
+        case DAEMON_CMD_CONNECT:
+            ret = _daemon_cmd_parse_connect(data, &cmd->connect);
             break;
         default:
             break;
@@ -117,3 +86,33 @@ int parse_command(const char *command_json, command_t *cmd) {
     return 0;
 }
 
+char *daemon_cmd_to_string(const daemon_cmd_t *cmd) {
+    if (cmd->type == DAEMON_CMD_UNKNOWN) return NULL;
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddNumberToObject(root, "type", cmd->type);
+
+    if (cmd->type == DAEMON_CMD_DISCOVERY || cmd->type == DAEMON_CMD_CONNECT ||
+        cmd->type == DAEMON_CMD_DISCONNECT) {
+        cJSON *data = cJSON_CreateObject();
+
+        switch (cmd->type) {
+            case DAEMON_CMD_DISCOVERY:
+                cJSON_AddNumberToObject(data, "duration", cmd->discovery.duration);
+                break;
+            case DAEMON_CMD_CONNECT:
+            case DAEMON_CMD_DISCONNECT:
+                cJSON_AddStringToObject(data, "ip", cmd->connect.ip4);
+                break;
+            default:
+                break;
+        }
+
+        cJSON_AddItemToObject(root, "data", data);
+    }
+
+    char *json_str = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+
+    return json_str;
+}

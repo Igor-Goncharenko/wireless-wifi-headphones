@@ -15,14 +15,9 @@ target_link_libraries(${PROJECT_NAME}
         pthread
 )
 
-target_link_libraries(${PROJECT_NAME}
-    PRIVATE
-)
-
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         include
-        ${CMAKE_SOURCE_DIR}/libs/cjson
         ${CMAKE_SOURCE_DIR}/libs/protocols
 )
 

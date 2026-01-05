@@ -25,16 +25,10 @@ target_link_libraries(${PROJECT_NAME}
         m
 )
 
-target_link_libraries(${PROJECT_NAME}
-    PRIVATE
-        cjson
-)
-
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         include
         ${LIBPULSE_INCLUDE_DIRS}
-        ${CMAKE_SOURCE_DIR}/libs/cjson
         ${CMAKE_SOURCE_DIR}/libs/protocols
 )
 

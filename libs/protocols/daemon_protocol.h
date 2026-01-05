@@ -1,5 +1,5 @@
-#ifndef WH_DAEMON_COMMANDS_H
-#define WH_DAEMON_COMMANDS_H
+#ifndef DAEMON_PROTOCOL_H
+#define DAEMON_PROTOCOL_H
 
 #define DEFAULT_DISCOVERY_DURATION 5
 
@@ -29,4 +29,4 @@ typedef struct {
     };
 } daemon_cmd_t;
 
-#endif /* WH_DAEMON_COMMANDS_H */
+#endif /* DAEMON_PROTOCOL_H */

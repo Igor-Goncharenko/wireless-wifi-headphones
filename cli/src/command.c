@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-#include "wh_daemon_commands.h"
+#include "daemon_protocol.h"
 
 static int _status_cb(const char *cmd_raw, daemon_cmd_t *cmd) {
     cmd->type = DAEMON_CMD_STATUS;

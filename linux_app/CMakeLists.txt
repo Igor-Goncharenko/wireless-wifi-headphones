@@ -35,7 +35,7 @@ target_include_directories(${PROJECT_NAME}
         include
         ${LIBPULSE_INCLUDE_DIRS}
         ${CMAKE_SOURCE_DIR}/libs/cjson
-        ${CMAKE_SOURCE_DIR}/libs/wh_daemon_commands
+        ${CMAKE_SOURCE_DIR}/libs/protocols
 )
 
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)

@@ -9,7 +9,7 @@
 #include "discovery.h"
 #include "rtp_client.h"
 
-#include "wh_daemon_commands.h"
+#include "daemon_protocol.h"
 
 static void send_discovery_data(const int client_fd, discovery_data_t *data) {
     char buffer[256];

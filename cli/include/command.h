@@ -4,7 +4,7 @@
 #define CLI_CMD_MAX_LEN 32
 #define CLI_CMD_MAX_HELP_LEN 1024
 
-#include "wh_daemon_commands.h"
+#include "daemon_protocol.h"
 
 typedef int (*cli_command_cb)(const char *cmd_raw, daemon_cmd_t *cmd);
 

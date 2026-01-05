@@ -3,7 +3,7 @@
 
 #include "discovery.h"
 #include "rtp_client.h"
-#include "wh_daemon_commands.h"
+#include "daemon_protocol.h"
 
 typedef struct {
     int client_fd;

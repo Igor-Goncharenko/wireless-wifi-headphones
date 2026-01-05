@@ -8,6 +8,8 @@
 #include "sdkconfig.h"
 #include <string.h>
 
+#include "real_time_protocol.h"
+
 static const char *TAG = "WHP " __FILE__;
 
 #define PACKET_BUFFER_SIZE (CONFIG_RTP_PACKET_SIZE + sizeof(rtp_header_t) + 1)

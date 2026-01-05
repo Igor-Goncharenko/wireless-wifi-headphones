@@ -18,25 +18,6 @@
 #define FRAMES_PER_PACKET 1024
 #define PACKET_SIZE (FRAMES_PER_PACKET + sizeof(rtp_header_t))
 
-#pragma pack(push, 1)
-typedef struct {
-    // first byte
-    uint8_t contributor_count : 4;
-    uint8_t ver : 2;
-    uint8_t p : 1;
-    uint8_t x : 1;
-
-    // second byte
-    uint8_t payload_types : 7;
-    uint8_t m : 1;
-
-    // other
-    uint16_t sequence;
-    uint32_t timestamp;
-    uint32_t ssrc;
-} rtp_header_t;
-#pragma pack(pop)
-
 typedef struct {
     int sockfd;
     struct sockaddr_in server_addr;

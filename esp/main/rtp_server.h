@@ -17,25 +17,6 @@ typedef struct {
     RingbufHandle_t rb;
 } rtp_server_t;
 
-#pragma pack(push, 1)
-typedef struct {
-    // first byte
-    uint8_t contributor_count : 4;
-    uint8_t ver : 2;
-    uint8_t p : 1;
-    uint8_t x : 1;
-
-    // second byte
-    uint8_t payload_types : 7;
-    uint8_t m : 1;
-
-    // other
-    uint16_t sequence;
-    uint32_t timestamp;
-    uint32_t ssrc;
-} rtp_header_t;
-#pragma pack(pop)
-
 int rtp_server_init(rtp_server_t *rtp_ser, const RingbufHandle_t rb);
 
 void rtp_server_destroy(rtp_server_t *rtp_ser);

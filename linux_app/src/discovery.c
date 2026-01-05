@@ -84,7 +84,7 @@ static void discovery_server_destroy(discovery_server_t *server) {
     }
 }
 
-static int parse_hp_resp_json(const char *buf, const size_t buf_size, headphone_response_t *resp) {
+static int parse_hp_resp_json(const char *buf, const size_t buf_size, headphones_info_t *resp) {
     cJSON *root = cJSON_ParseWithLength(buf, buf_size);
     if (root == NULL) {
         const char *error_ptr = cJSON_GetErrorPtr();
@@ -94,27 +94,20 @@ static int parse_hp_resp_json(const char *buf, const size_t buf_size, headphone_
         return -1;
     }
 
-    cJSON *type = cJSON_GetObjectItemCaseSensitive(root, "type");
-    cJSON *model = cJSON_GetObjectItemCaseSensitive(root, "model");
-    cJSON *id = cJSON_GetObjectItemCaseSensitive(root, "id");
-    cJSON *ip = cJSON_GetObjectItemCaseSensitive(root, "ip");
+    cJSON *name = cJSON_GetObjectItemCaseSensitive(root, "name");
+    cJSON *mac = cJSON_GetObjectItemCaseSensitive(root, "mac");
+    cJSON *ipv4 = cJSON_GetObjectItemCaseSensitive(root, "ipv4");
 
-    if (cJSON_IsString(type) && cJSON_IsString(model) && 
-        cJSON_IsString(id) && cJSON_IsString(ip)) {
+    if (cJSON_IsString(name) && cJSON_IsString(mac) && cJSON_IsString(ipv4)) {
+        strncpy(resp->name, name->valuestring, sizeof(resp->name) - 1);
+        resp->name[sizeof(resp->name) - 1] = '\0';
         
-        strncpy(resp->type, type->valuestring, sizeof(resp->type) - 1);
-        resp->type[sizeof(resp->type) - 1] = '\0';
+        strncpy(resp->mac, mac->valuestring, sizeof(resp->mac) - 1);
+        resp->mac[sizeof(resp->mac) - 1] = '\0';
         
-        strncpy(resp->model, model->valuestring, sizeof(resp->model) - 1);
-        resp->model[sizeof(resp->model) - 1] = '\0';
-        
-        strncpy(resp->id, id->valuestring, sizeof(resp->id) - 1);
-        resp->id[sizeof(resp->id) - 1] = '\0';
-        
-        strncpy(resp->ip_v4, ip->valuestring, sizeof(resp->ip_v4) - 1);
-        resp->ip_v4[sizeof(resp->ip_v4) - 1] = '\0';
-    }
-    else {
+        strncpy(resp->ipv4, ipv4->valuestring, sizeof(resp->ipv4) - 1);
+        resp->ipv4[sizeof(resp->ipv4) - 1] = '\0';
+    } else {
         syslog(LOG_ERR,"Missing or invalid fields in JSON\n"); 
         cJSON_Delete(root);
         return -1;
@@ -124,7 +117,7 @@ static int parse_hp_resp_json(const char *buf, const size_t buf_size, headphone_
     return 0;
 }
 
-static int discover_headphones(const discovery_server_t *server, headphone_response_t *devices, 
+static int discover_headphones(const discovery_server_t *server, headphones_info_t *devices,
                                const int max_devices, const int duration) {
     char buffer[BUFFER_SIZE];
     int device_count = 0;
@@ -191,7 +184,7 @@ int discover_task(discovery_data_t *data, const int duration) {
     }
 
     discovery_server_t server = { 0 };
-    headphone_response_t hps[16];
+    headphones_info_t hps[16];
 
     pthread_mutex_lock(&data->mutex);
     
@@ -206,7 +199,7 @@ int discover_task(discovery_data_t *data, const int duration) {
     }
 
     data->count = discover_headphones(&server, hps, 16, duration);
-    memcpy(data->data, hps, data->count * sizeof(headphone_response_t));
+    memcpy(data->data, hps, data->count * sizeof(headphones_info_t));
     data->is_discovering = false;
 
     pthread_mutex_unlock(&data->mutex);

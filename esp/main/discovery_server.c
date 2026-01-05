@@ -9,32 +9,31 @@
 #include <stdio.h>
 
 #include "wifi.h"
+#include "discovery_protocol.h"
 
 static const char *TAG = "WHP " __FILE__;
 
-device_info_t g_device_info;
+headphones_info_t g_device_info;
 
 static void init_device_info(void) {
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
-    
-    snprintf(g_device_info.device_id, sizeof(g_device_info.device_id),
+
+    snprintf(g_device_info.mac, sizeof(g_device_info.mac),
              "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
-    
-    strlcpy(g_device_info.model, "WiFi Headphones v1.0", sizeof(g_device_info.model));
-    strcpy(g_device_info.ip_addr, g_ip4_str);
-    
-    ESP_LOGI(TAG, "Device: ID=\"%s\"; Model=\"\"", g_device_info.device_id, g_device_info.model);
+
+    strncpy(g_device_info.name, "WiFi Headphones", sizeof(g_device_info.name) - 1);
+    strncpy(g_device_info.ipv4, g_ip4_str, sizeof(g_device_info.ipv4) - 1);
+
+    ESP_LOGI(TAG, "Device: name = \"%s\"; mac=\"%s\"; ipv4=\"%s\";", g_device_info.name,
+             g_device_info.mac, g_device_info.ipv4);
 }
 
 static int create_discovery_response(char *buffer, const size_t buffer_size) {
     return snprintf(buffer, buffer_size,
-                   "{\"type\":\"HEADPHONES_RESPONSE\","
-                   "\"model\":\"%s\","
-                   "\"id\":\"%s\","
-                   "\"ip\":\"%s\"}",
-                   g_device_info.model, g_device_info.device_id, g_device_info.ip_addr);
+                   "{\"name\":\"%s\",\"mac\":\"%s\",\"ipv4\":\"%s\"}",
+                   g_device_info.name, g_device_info.mac, g_device_info.ipv4);
 }
 
 void discovery_server_task(void *args) {

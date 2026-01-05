@@ -7,7 +7,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-#define MAX_HEADPHONES_RESPS 16
+#include "discovery_protocol.h"
+
 #define MAX_DISCOVERY_DURATION 10
 
 typedef struct {
@@ -17,14 +18,7 @@ typedef struct {
 } discovery_server_t;
 
 typedef struct {
-    char type[32];
-    char model[64];
-    char id[32];
-    char ip_v4[16];
-} headphone_response_t;
-
-typedef struct {
-    headphone_response_t data[MAX_HEADPHONES_RESPS];
+    headphones_info_t data[MAX_HEADPHONES_RESPS];
     int count;
     bool is_discovering;
     pthread_mutex_t mutex;

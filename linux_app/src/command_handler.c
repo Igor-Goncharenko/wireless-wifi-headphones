@@ -22,9 +22,8 @@ static void send_discovery_data(const int client_fd, discovery_data_t *data) {
         write(client_fd, buffer, size);
 
         for (int i = 0; i < data->count; i++) {
-            size = sprintf(buffer, " %d) type=%s; model=%s; id=%s; ip4=%s\n", 
-                           i + 1, data->data[i].type, data->data[i].model, data->data[i].id, 
-                           data->data[i].ip_v4);
+            size = sprintf(buffer, " %d) name=%s; mac=%s; ipv4=%s\n",
+                           i + 1, data->data[i].name, data->data[i].mac, data->data[i].ipv4);
             write(client_fd, buffer, size);
         }
     } else {

@@ -30,18 +30,11 @@ static void init_device_info(void) {
              g_device_info.mac, g_device_info.ipv4);
 }
 
-static int create_discovery_response(char *buffer, const size_t buffer_size) {
-    return snprintf(buffer, buffer_size,
-                   "{\"name\":\"%s\",\"mac\":\"%s\",\"ipv4\":\"%s\"}",
-                   g_device_info.name, g_device_info.mac, g_device_info.ipv4);
-}
-
 void discovery_server_task(void *args) {
     int sockfd;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
     char buffer[128];
-    char response[256];
     int recv_len;
 
     init_device_info();
@@ -87,9 +80,7 @@ void discovery_server_task(void *args) {
             //         IP2STR(&client_addr.sin_addr.s_addr));
             
             if (strcmp(buffer, CONFIG_DISCOVERY_REQUEST) == 0) {
-                int response_len = create_discovery_response(response, sizeof(response));
-               
-                if (sendto(sockfd, response, response_len, 0,
+                if (sendto(sockfd, &g_device_info, sizeof(headphones_info_t), 0,
                           (struct sockaddr *)&client_addr, client_len) < 0) {
                     ESP_LOGE(TAG, "Failed to send response");
                 } else {

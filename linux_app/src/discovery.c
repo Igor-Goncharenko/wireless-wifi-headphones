@@ -2,7 +2,6 @@
 
 #include <errno.h>
 #include <pthread.h>
-#include <stdio.h>
 #include <sys/syslog.h>
 #include <time.h>
 #include <string.h>
@@ -13,11 +12,8 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-#include <cJSON.h>
-
 #define MULTICAST_GROUP "224.1.1.1"
 #define DISCOVERY_PORT 5000
-#define BUFFER_SIZE 1024
 #define DISCOVERY_REQUEST "DISCOVER_HEADPHONES_REQUEST"
 
 static int discovery_server_init(discovery_server_t *server) {
@@ -84,42 +80,8 @@ static void discovery_server_destroy(discovery_server_t *server) {
     }
 }
 
-static int parse_hp_resp_json(const char *buf, const size_t buf_size, headphones_info_t *resp) {
-    cJSON *root = cJSON_ParseWithLength(buf, buf_size);
-    if (root == NULL) {
-        const char *error_ptr = cJSON_GetErrorPtr();
-        if (error_ptr != NULL) {
-            syslog(LOG_ERR, "JSON parse error: %s\n", error_ptr);
-        }
-        return -1;
-    }
-
-    cJSON *name = cJSON_GetObjectItemCaseSensitive(root, "name");
-    cJSON *mac = cJSON_GetObjectItemCaseSensitive(root, "mac");
-    cJSON *ipv4 = cJSON_GetObjectItemCaseSensitive(root, "ipv4");
-
-    if (cJSON_IsString(name) && cJSON_IsString(mac) && cJSON_IsString(ipv4)) {
-        strncpy(resp->name, name->valuestring, sizeof(resp->name) - 1);
-        resp->name[sizeof(resp->name) - 1] = '\0';
-        
-        strncpy(resp->mac, mac->valuestring, sizeof(resp->mac) - 1);
-        resp->mac[sizeof(resp->mac) - 1] = '\0';
-        
-        strncpy(resp->ipv4, ipv4->valuestring, sizeof(resp->ipv4) - 1);
-        resp->ipv4[sizeof(resp->ipv4) - 1] = '\0';
-    } else {
-        syslog(LOG_ERR,"Missing or invalid fields in JSON\n"); 
-        cJSON_Delete(root);
-        return -1;
-    }
-
-    cJSON_Delete(root);
-    return 0;
-}
-
 static int discover_headphones(const discovery_server_t *server, headphones_info_t *devices,
                                const int max_devices, const int duration) {
-    char buffer[BUFFER_SIZE];
     int device_count = 0;
 
     struct sockaddr_in multicast_addr;
@@ -127,33 +89,33 @@ static int discover_headphones(const discovery_server_t *server, headphones_info
     multicast_addr.sin_family = AF_INET;
     multicast_addr.sin_addr.s_addr = inet_addr(MULTICAST_GROUP);
     multicast_addr.sin_port = htons(DISCOVERY_PORT);
-    
+
     if (sendto(server->sockfd, DISCOVERY_REQUEST, sizeof(DISCOVERY_REQUEST) - 1, 0,
                (struct sockaddr*)&multicast_addr, sizeof(multicast_addr)) < 0) {
         syslog(LOG_ERR, "Discovery server sendto failed: errno=%d, strerror=\"%s\"",
                errno, strerror(errno));
         return -1;
     }
-    
+
     syslog(LOG_INFO, "Discovery request sent. Listening for responses...");
-    
+
     time_t start_time = time(NULL);
     while ((time(NULL) - start_time) < duration && device_count < max_devices) {
         struct sockaddr_in sender_addr;
         socklen_t addr_len = sizeof(sender_addr);
         ssize_t recv_len;
-        
-        recv_len = recvfrom(server->sockfd, buffer, BUFFER_SIZE - 1, 0,
-                           (struct sockaddr*)&sender_addr, &addr_len);
 
-        if (recv_len > 0) {
-            buffer[recv_len] = '\0';
-            if (parse_hp_resp_json(buffer, recv_len, &devices[device_count]) == 0) {
-                device_count++;
-            }
+        recv_len = recvfrom(server->sockfd, &devices[device_count], sizeof(headphones_info_t), 0,
+                            (struct sockaddr*)&sender_addr, &addr_len);
+
+        if (recv_len != sizeof(headphones_info_t)) {
+            syslog(LOG_ERR, "Failed to recv discovery data");
+            continue;
         }
+
+        device_count++;
     }
-    
+
     return device_count;
 }
 

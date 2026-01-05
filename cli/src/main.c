@@ -9,6 +9,7 @@
 
 #include "command.h"
 #include "info_msg.h"
+#include "wh_daemon_commands.h"
 
 #define SOCKET_PATH "/tmp/wifi_headphones_daemon.sock"
 
@@ -34,7 +35,7 @@ void init_signal_handler(void) {
     sigaction(SIGINT, &sa, NULL);
 }
 
-int send_command_to_daemon(const char *command) {
+int send_command_to_daemon(const daemon_cmd_t *cmd) {
     int sock = 0;
     struct sockaddr_un addr;
 
@@ -53,8 +54,8 @@ int send_command_to_daemon(const char *command) {
         return -1;
     }
 
-    if (dprintf(sock, "%s\n", command) < 0) {
-        perror("dprintf");
+    if (write(sock, cmd, sizeof(daemon_cmd_t)) != sizeof(daemon_cmd_t)) {
+        perror("write daemon_cmd_t");
         close(sock);
         return -1;
     }
@@ -72,18 +73,17 @@ int send_command_to_daemon(const char *command) {
     return 0;
 }
 
-int process_cli_command(const char *cmd) {
-    if (strcmp(cmd, "exit") == 0) {
+int process_cli_command(const char *cmd_str) {
+    if (strcmp(cmd_str, "exit") == 0) {
         return 1;
-    } else if (strcmp(cmd, "help") == 0 || strcmp(cmd, "?") == 0) {
+    } else if (strcmp(cmd_str, "help") == 0 || strcmp(cmd_str, "?") == 0) {
         fputs(HELP_MSG, stdout);
         return 0;
     } else {
-        char *command = process_command(cmd);
+        daemon_cmd_t cmd;
         // printf("cmd='%s'; resp='%s'\n", cmd, command);
-        if (command) {
-            send_command_to_daemon(command);
-            free(command);
+        if (process_command(cmd_str, &cmd) == 0) {
+            send_command_to_daemon(&cmd);
         }
         return 0;
     }

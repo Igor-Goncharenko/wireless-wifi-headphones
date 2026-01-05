@@ -14,6 +14,6 @@ typedef struct {
     cli_command_cb cb;
 } cli_command_t;
 
-char *process_command(const char *cmd_str);
+int process_command(const char *cmd_str, daemon_cmd_t *dest);
 
 #endif /* COMMAND_H */

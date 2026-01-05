@@ -29,8 +29,4 @@ typedef struct {
     };
 } daemon_cmd_t;
 
-char *daemon_cmd_to_string(const daemon_cmd_t *cmd);
-
-int daemon_cmd_parse(const char *command_json, daemon_cmd_t *cmd);
-
 #endif /* WH_DAEMON_COMMANDS_H */

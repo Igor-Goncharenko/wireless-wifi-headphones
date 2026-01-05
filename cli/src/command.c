@@ -5,48 +5,6 @@
 
 #include "wh_daemon_commands.h"
 
-static int _status_cb(const char *cmd_raw, daemon_cmd_t *cmd);
-static int _discovery_cb(const char *cmd_raw, daemon_cmd_t *cmd);
-static int _discovery_data_cb(const char *cmd_raw, daemon_cmd_t *cmd);
-static int _connect_cb(const char *cmd_raw, daemon_cmd_t *cmd);
-static int _disconnect_cb(const char *cmd_raw, daemon_cmd_t *cmd);
-
-static const cli_command_t COMMANDS[DAEMON_CMD_TYPE_LAST + 1] = {
-    [DAEMON_CMD_STATUS] = {
-        .cmd = "status",
-        .cb = _status_cb,
-    },
-    [DAEMON_CMD_DISCOVERY] = {
-        .cmd = "discovery",
-        .cb = _discovery_cb,
-    },
-    [DAEMON_CMD_DISCOVERY_DATA] = {
-        .cmd = "discovery_data",
-        .cb = _discovery_data_cb,
-    },
-    [DAEMON_CMD_CONNECT] = {
-        .cmd = "connect",
-        .cb = _connect_cb,
-    },
-    [DAEMON_CMD_DISCONNECT] = {
-        .cmd = "disconnect",
-        .cb = _disconnect_cb,
-    },
-};
-
-char *process_command(const char *cmd_str) {
-    for (int i = 0; i < DAEMON_CMD_TYPE_LAST + 1; i++) {
-        size_t len = strlen(COMMANDS[i].cmd);
-        char after_cmd = cmd_str[len];
-        if (strncmp(COMMANDS[i].cmd, cmd_str, len) == 0 && (after_cmd == ' ' || after_cmd == '\0')) {
-            daemon_cmd_t cmd;
-            COMMANDS[i].cb(cmd_str, &cmd);
-            return daemon_cmd_to_string(&cmd);
-        }
-    }
-    return NULL;
-}
-
 static int _status_cb(const char *cmd_raw, daemon_cmd_t *cmd) {
     cmd->type = DAEMON_CMD_STATUS;
     return 0;
@@ -86,4 +44,41 @@ static int _disconnect_cb(const char *cmd_raw, daemon_cmd_t *cmd) {
 
     ret = sscanf(cmd_raw, "disconnect %15s", cmd->connect.ip4);
     return (ret == 1) ? 0 : -1;
+}
+
+static const cli_command_t COMMANDS[DAEMON_CMD_TYPE_LAST + 1] = {
+    [DAEMON_CMD_STATUS] = {
+        .cmd = "status",
+        .cb = _status_cb,
+    },
+    [DAEMON_CMD_DISCOVERY] = {
+        .cmd = "discovery",
+        .cb = _discovery_cb,
+    },
+    [DAEMON_CMD_DISCOVERY_DATA] = {
+        .cmd = "discovery_data",
+        .cb = _discovery_data_cb,
+    },
+    [DAEMON_CMD_CONNECT] = {
+        .cmd = "connect",
+        .cb = _connect_cb,
+    },
+    [DAEMON_CMD_DISCONNECT] = {
+        .cmd = "disconnect",
+        .cb = _disconnect_cb,
+    },
+};
+
+int process_command(const char *cmd_str, daemon_cmd_t *dest) {
+    for (int i = 0; i < DAEMON_CMD_TYPE_LAST + 1; i++) {
+        size_t len = strlen(COMMANDS[i].cmd);
+        char after_cmd = cmd_str[len];
+        if (strncmp(COMMANDS[i].cmd, cmd_str, len) == 0 && (after_cmd == ' ' || after_cmd == '\0')) {
+            if (COMMANDS[i].cb(cmd_str, dest) != 0)
+                return -1;
+            return 0;
+        }
+    }
+
+    return -1;
 }

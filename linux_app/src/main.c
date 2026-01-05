@@ -205,12 +205,11 @@ int main(void) {
             continue;
         }
 
-        ssize_t bytes = read(arg->client_fd, arg->command, MAX_COMMAND_LEN - 1);
+        ssize_t bytes = read(arg->client_fd, &arg->cmd, sizeof(arg->cmd));
 
         if (bytes > 0) {
             pthread_t tid;
 
-            arg->command[bytes - 1] = '\0';
             if ((ret = pthread_create(&tid, NULL, process_command_task, arg)) == 0) {
                 pthread_detach(tid);
             } else {

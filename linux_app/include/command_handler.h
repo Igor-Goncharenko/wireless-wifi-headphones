@@ -3,12 +3,11 @@
 
 #include "discovery.h"
 #include "rtp_client.h"
-
-#define MAX_COMMAND_LEN 256
+#include "wh_daemon_commands.h"
 
 typedef struct {
     int client_fd;
-    char command[MAX_COMMAND_LEN];
+    daemon_cmd_t cmd;
     discovery_data_t *disc_data;
     rtp_connection_data_t *conn_data;
 } process_command_arg_t;

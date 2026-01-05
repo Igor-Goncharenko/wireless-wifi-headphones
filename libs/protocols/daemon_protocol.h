@@ -1,6 +1,10 @@
 #ifndef DAEMON_PROTOCOL_H
 #define DAEMON_PROTOCOL_H
 
+#include <stdbool.h>
+
+#include "discovery_protocol.h"
+
 #define DEFAULT_DISCOVERY_DURATION 5
 
 #define DAEMON_CMD_TYPE_LAST DAEMON_CMD_DISCONNECT
@@ -28,5 +32,28 @@ typedef struct {
         daemon_cmd_connect_t connect;
     };
 } daemon_cmd_t;
+
+typedef struct {
+    bool connected;
+    char ipv4[16];
+} daemon_rsp_status_t;
+
+typedef struct {
+    int n_found;
+    headphones_info_t found[MAX_HEADPHONES_RESPS];
+} daemon_rsp_discovery_t;
+
+typedef struct {
+    bool success;
+} daemon_rsp_connect_t;
+
+typedef struct {
+    daemon_cmd_type_e type;
+    union {
+        daemon_rsp_status_t status;
+        daemon_rsp_discovery_t discovery;
+        daemon_rsp_connect_t connect;
+    };
+} daemon_rsp_t;
 
 #endif /* DAEMON_PROTOCOL_H */

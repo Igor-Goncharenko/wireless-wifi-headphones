@@ -35,6 +35,37 @@ void init_signal_handler(void) {
     sigaction(SIGINT, &sa, NULL);
 }
 
+void print_daemon_resp(const daemon_rsp_t *resp) {
+    switch (resp->type) {
+        case DAEMON_CMD_STATUS:
+            if (resp->status.connected)
+                printf("Connected to %s\n", resp->status.ipv4);
+            else
+                printf("Not connected\n");
+            break;
+        case DAEMON_CMD_DISCOVERY:
+        case DAEMON_CMD_DISCOVERY_DATA:
+            printf("Total %d devices found\n", resp->discovery.n_found);
+            for (int i = 0; i < resp->discovery.n_found; i++) {
+                printf(" %d) name=\"%s\"; mac=\"%s\"; ipv4=\"%s\"\n",
+                       i + 1,
+                       resp->discovery.found[i].name,
+                       resp->discovery.found[i].mac,
+                       resp->discovery.found[i].ipv4);
+            }
+            break;
+        case DAEMON_CMD_CONNECT:
+            if (resp->connect.success)
+                printf("Successfully connected\n");
+            else
+                printf("Failed to connect\n");
+            break;
+        case DAEMON_CMD_DISCONNECT:
+        case DAEMON_CMD_UNKNOWN:
+            break;
+    }
+}
+
 int send_command_to_daemon(const daemon_cmd_t *cmd) {
     int sock = 0;
     struct sockaddr_un addr;
@@ -62,12 +93,13 @@ int send_command_to_daemon(const daemon_cmd_t *cmd) {
 
     shutdown(sock, SHUT_WR);
 
-    char buffer[1024];
-    ssize_t bytes_received = read(sock, buffer, sizeof(buffer) - 1);
-    if (bytes_received > 0) {
-        buffer[bytes_received] = '\0';
-        printf("Response from daemon: \"%s\"\n", buffer);
+    daemon_rsp_t resp;
+    if (read(sock, &resp, sizeof(resp)) != sizeof(resp)) {
+        perror("Failed to read daemon command response");
+        close(sock);
+        return -1;
     }
+    print_daemon_resp(&resp);
 
     close(sock);
     return 0;

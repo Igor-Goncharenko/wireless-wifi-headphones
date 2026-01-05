@@ -119,7 +119,7 @@ static void *rtp_sender_task(void *arg) {
     return NULL;
 }
 
-int rtp_connection_start(rtp_connection_data_t *data, const char *ip4) {
+int rtp_connection_start(rtp_connection_data_t *data, const char ipv4[16]) {
     pthread_mutex_lock(&data->mutex);
 
     if (data->has_active_session) {
@@ -128,7 +128,7 @@ int rtp_connection_start(rtp_connection_data_t *data, const char *ip4) {
         return -1;
     }
 
-    if (rtp_session_create(&data->active_session, ip4, RTP_PORT) != 0) {
+    if (rtp_session_create(&data->active_session, ipv4, RTP_PORT) != 0) {
         syslog(LOG_ERR, "Failed to create RTP session");
         pthread_mutex_unlock(&data->mutex);
         return -1;
@@ -145,6 +145,7 @@ int rtp_connection_start(rtp_connection_data_t *data, const char *ip4) {
 
     data->has_active_session = true;
     data->is_running = true;
+    strncpy(data->ipv4, ipv4, 15);
 
     pthread_mutex_unlock(&data->mutex);
 

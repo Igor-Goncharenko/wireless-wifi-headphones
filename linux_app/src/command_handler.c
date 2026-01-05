@@ -2,88 +2,55 @@
 
 #include <pthread.h>
 #include <unistd.h>
-#include <stdio.h>
 #include <syslog.h>
 #include <stdlib.h>
+#include <string.h>
 
 #include "discovery.h"
 #include "rtp_client.h"
 
 #include "daemon_protocol.h"
 
-static void send_discovery_data(const int client_fd, discovery_data_t *data) {
-    char buffer[256];
-    int size;
-
-    pthread_mutex_lock(&data->mutex);
-    
-    if (data->count > 0) {
-        size = sprintf(buffer, "devices=%d:\n", data->count);
-        write(client_fd, buffer, size);
-
-        for (int i = 0; i < data->count; i++) {
-            size = sprintf(buffer, " %d) name=%s; mac=%s; ipv4=%s\n",
-                           i + 1, data->data[i].name, data->data[i].mac, data->data[i].ipv4);
-            write(client_fd, buffer, size);
-        }
-    } else {
-        const char response[] = "No devices found\n";
-        write(client_fd, response, sizeof(response) - 1);
-    }
-
-    pthread_mutex_unlock(&data->mutex);
-}
-
-static int discover_and_send_data(const int client_fd, discovery_data_t *data, const int duration) {
-    if (discover_task(data, duration) != 0) {
-        syslog(LOG_ERR, "Failed to discover headphones");
-        return -1;
-    }
-
-    send_discovery_data(client_fd, data);
-
-    return 0;
-}
-
-static int connect_device(rtp_connection_data_t *conn_data, const char *ip4) {
-    if (rtp_connection_start(conn_data, ip4) != 0) {
-        syslog(LOG_ERR, "Failed to start connection");
-        return -1;
-    }
-    syslog(LOG_INFO, "Successfully connected to device with ip=%s", ip4);
-    return 0;
-}
-
-static int disconnect_device(rtp_connection_data_t *conn_data) {
-    rtp_connection_stop(conn_data);
-    syslog(LOG_INFO, "Disconnecting from device");
-    return 0;
-}
-
 void *process_command_task(void *arg) {
     process_command_arg_t *pc_arg = (process_command_arg_t*) arg;
-
-    const char STATUS_RESP[] = "Daemon is working\n";
+    daemon_rsp_t resp = {
+        .type = pc_arg->cmd.type,
+    };
 
     switch (pc_arg->cmd.type) {
         case DAEMON_CMD_STATUS:
-            write(pc_arg->client_fd, STATUS_RESP, sizeof(STATUS_RESP) - 1);
+            resp.status.connected = pc_arg->conn_data->is_running;
+            strncpy(resp.status.ipv4, pc_arg->conn_data->ipv4, 15);
             break;
         case DAEMON_CMD_DISCOVERY:
-            discover_and_send_data(pc_arg->client_fd, pc_arg->disc_data, pc_arg->cmd.discovery.duration);
-            break;
+            if (discover_task(pc_arg->disc_data, pc_arg->cmd.discovery.duration) != 0) {
+                syslog(LOG_ERR, "Failed to discover headphones");
+            }
         case DAEMON_CMD_DISCOVERY_DATA:
-            send_discovery_data(pc_arg->client_fd, pc_arg->disc_data);
+            resp.discovery.n_found = pc_arg->disc_data->count;
+            memcpy(resp.discovery.found, pc_arg->disc_data->data,
+                   pc_arg->disc_data->count * sizeof(headphones_info_t));
             break;
         case DAEMON_CMD_CONNECT:
-            connect_device(pc_arg->conn_data, pc_arg->cmd.connect.ip4);
+            if (rtp_connection_start(pc_arg->conn_data, pc_arg->cmd.connect.ip4) != 0) {
+                syslog(LOG_ERR, "Failed to start connection");
+                resp.connect.success = false;
+            } else {
+                syslog(LOG_INFO, "Successfully connected to device with ip=%s", pc_arg->cmd.connect.ip4);
+                resp.connect.success = true;
+            }
             break;
         case DAEMON_CMD_DISCONNECT:
-            disconnect_device(pc_arg->conn_data);
+            rtp_connection_stop(pc_arg->conn_data);
+            syslog(LOG_INFO, "Disconnecting from device");
             break;
         case DAEMON_CMD_UNKNOWN:
             syslog(LOG_WARNING, "Got DAEMON_CMD_UNKNOWN");
             break;
+    }
+
+    if (write(pc_arg->client_fd, &resp, sizeof(resp)) != sizeof(resp)) {
+        syslog(LOG_ERR, "Failed to write daemon command response");
     }
 
     close(pc_arg->client_fd);

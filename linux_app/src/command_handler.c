@@ -29,7 +29,7 @@ void *process_command_task(void *arg) {
         case DAEMON_CMD_DISCOVERY_DATA:
             resp.discovery.n_found = pc_arg->disc_data->count;
             memcpy(resp.discovery.found, pc_arg->disc_data->data,
-                   pc_arg->disc_data->count * sizeof(headphones_info_t));
+                   pc_arg->disc_data->count * sizeof(device_info_t));
             break;
         case DAEMON_CMD_CONNECT:
             if (rtp_connection_start(pc_arg->conn_data, pc_arg->cmd.connect.ip4) != 0) {

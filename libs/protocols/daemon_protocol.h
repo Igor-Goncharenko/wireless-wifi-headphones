@@ -40,7 +40,7 @@ typedef struct {
 
 typedef struct {
     int n_found;
-    headphones_info_t found[MAX_HEADPHONES_RESPS];
+    device_info_t found[MAX_HEADPHONES_RESPS];
 } daemon_rsp_discovery_t;
 
 typedef struct {

@@ -1,4 +1,9 @@
 menu "WiFi Headphones Configuration"
+    config HEADPHONES_NAME
+        string "Headphones name"
+        default "WiFi Headphones"
+        help
+            The name that the discovery server will send
 
     menu "WiFi conf"
         config WIFI_SSID

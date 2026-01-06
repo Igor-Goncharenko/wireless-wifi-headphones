@@ -102,7 +102,7 @@ static void i2s_init_std_simplex(void) {
     ESP_ERROR_CHECK(i2s_channel_enable(s_tx_chan));
 
     ESP_LOGI(TAG, "Initialized: sample_rate=%d, channels=%d, sample_size=%d",
-             CONFIG_AUDIO_SAMPLE_RATE, I2S_CHANNEL, I2S_SAMPLE_SIZE * 2);
+             CONFIG_AUDIO_SAMPLE_RATE, CONFIG_AUDIO_CHANNELS, CONFIG_AUDIO_SAMPLE_SIZE * 8);
 }
 
 void app_main(void) {

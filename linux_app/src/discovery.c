@@ -80,7 +80,7 @@ static void discovery_server_destroy(discovery_server_t *server) {
     }
 }
 
-static int discover_headphones(const discovery_server_t *server, headphones_info_t *devices,
+static int discover_headphones(const discovery_server_t *server, device_info_t *devices,
                                const int max_devices, const int duration) {
     int device_count = 0;
 
@@ -105,13 +105,19 @@ static int discover_headphones(const discovery_server_t *server, headphones_info
         socklen_t addr_len = sizeof(sender_addr);
         ssize_t recv_len;
 
-        recv_len = recvfrom(server->sockfd, &devices[device_count], sizeof(headphones_info_t), 0,
+        device_info_t received_dev;
+        recv_len = recvfrom(server->sockfd, &received_dev, sizeof(device_info_t), 0,
                             (struct sockaddr*)&sender_addr, &addr_len);
 
-        if (recv_len != sizeof(headphones_info_t)) {
-            syslog(LOG_ERR, "Failed to recv discovery data");
+        if (recv_len != sizeof(device_info_t)) {
+            syslog(LOG_ERR, "Failed to recv discovery data, received=%zd (exp=%zu)", recv_len,
+                   sizeof(device_info_t));
             continue;
         }
+
+        memcpy(&devices[device_count], &received_dev, sizeof(device_info_t));
+        devices[device_count].sample_rate = ntohs(received_dev.sample_rate);
+
 
         device_count++;
     }
@@ -146,7 +152,7 @@ int discover_task(discovery_data_t *data, const int duration) {
     }
 
     discovery_server_t server = { 0 };
-    headphones_info_t hps[16];
+    device_info_t hps[16];
 
     pthread_mutex_lock(&data->mutex);
     
@@ -161,7 +167,7 @@ int discover_task(discovery_data_t *data, const int duration) {
     }
 
     data->count = discover_headphones(&server, hps, 16, duration);
-    memcpy(data->data, hps, data->count * sizeof(headphones_info_t));
+    memcpy(data->data, hps, data->count * sizeof(device_info_t));
     data->is_discovering = false;
 
     pthread_mutex_unlock(&data->mutex);

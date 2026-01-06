@@ -18,7 +18,7 @@ typedef struct {
 } discovery_server_t;
 
 typedef struct {
-    device_info_t data[MAX_HEADPHONES_RESPS];
+    headphones_info_t data[MAX_HEADPHONES_RESPS];
     int count;
     bool is_discovering;
     pthread_mutex_t mutex;

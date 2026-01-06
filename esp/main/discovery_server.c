@@ -13,13 +13,13 @@
 
 static const char *TAG = "WHP " __FILE__;
 
-device_info_t g_device_info = {
-    .info = {
-        .name = CONFIG_HEADPHONES_NAME,
+headphones_info_t g_device_info = {
+    .name = CONFIG_HEADPHONES_NAME,
+    .audio = {
+        .bit_width = CONFIG_AUDIO_SAMPLE_SIZE,
+        .sample_rate = htons(CONFIG_AUDIO_SAMPLE_RATE),
+        .channels = CONFIG_AUDIO_CHANNELS,
     },
-    .bit_width = CONFIG_AUDIO_SAMPLE_SIZE,
-    .sample_rate = htons(CONFIG_AUDIO_SAMPLE_RATE),
-    .channels = CONFIG_AUDIO_CHANNELS,
 };
 
 
@@ -27,14 +27,14 @@ static void init_device_info(void) {
     uint8_t mac[6];
     esp_read_mac(mac, ESP_MAC_WIFI_STA);
 
-    snprintf(g_device_info.info.mac, sizeof(g_device_info.info.mac),
+    snprintf(g_device_info.mac, sizeof(g_device_info.mac),
              "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    strncpy(g_device_info.info.ipv4, g_ip4_str, sizeof(g_device_info.info.ipv4) - 1);
+    strncpy(g_device_info.ipv4, g_ip4_str, sizeof(g_device_info.ipv4) - 1);
 
-    ESP_LOGI(TAG, "Device: name = \"%s\"; mac=\"%s\"; ipv4=\"%s\";", g_device_info.info.name,
-             g_device_info.info.mac, g_device_info.info.ipv4);
+    ESP_LOGI(TAG, "Device: name = \"%s\"; mac=\"%s\"; ipv4=\"%s\";", g_device_info.name,
+             g_device_info.mac, g_device_info.ipv4);
 }
 
 void discovery_server_task(void *args) {
@@ -86,7 +86,7 @@ void discovery_server_task(void *args) {
             ESP_LOGI(TAG, "received discovery request: \"%s\"", buffer);
 
             if (strcmp(buffer, CONFIG_DISCOVERY_REQUEST) == 0) {
-                if (sendto(sockfd, &g_device_info, sizeof(device_info_t), 0,
+                if (sendto(sockfd, &g_device_info, sizeof(headphones_info_t), 0,
                           (struct sockaddr *)&client_addr, client_len) < 0) {
                     ESP_LOGE(TAG, "Failed to send response");
                 } else {

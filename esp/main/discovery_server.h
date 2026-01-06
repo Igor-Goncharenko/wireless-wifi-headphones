@@ -3,7 +3,7 @@
 
 #include "discovery_protocol.h"
 
-extern device_info_t g_device_info;
+extern headphones_info_t g_device_info;
 
 void discovery_server_task(void *args);
 

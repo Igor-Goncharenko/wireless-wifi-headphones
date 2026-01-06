@@ -50,12 +50,12 @@ void print_daemon_resp(const daemon_rsp_t *resp) {
                 printf(" %d) name=\"%s\"; mac=\"%s\"; ipv4=\"%s\"; "
                        "sample_rate=%d; sample_size=%d; channels=%d\n",
                        i + 1,
-                       resp->discovery.found[i].info.name,
-                       resp->discovery.found[i].info.mac,
-                       resp->discovery.found[i].info.ipv4,
-                       resp->discovery.found[i].sample_rate,
-                       resp->discovery.found[i].bit_width * 8,
-                       resp->discovery.found[i].channels);
+                       resp->discovery.found[i].name,
+                       resp->discovery.found[i].mac,
+                       resp->discovery.found[i].ipv4,
+                       resp->discovery.found[i].audio.sample_rate,
+                       resp->discovery.found[i].audio.bit_width * 8,
+                       resp->discovery.found[i].audio.channels);
             }
             break;
         case DAEMON_CMD_CONNECT:

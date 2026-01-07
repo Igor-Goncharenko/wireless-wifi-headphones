@@ -1,5 +1,5 @@
-#ifndef DISCOVERY_PROTOCOL_H
-#define DISCOVERY_PROTOCOL_H
+#ifndef CONFIG_DISCOVERY_PROTOCOL_H
+#define CONFIG_DISCOVERY_PROTOCOL_H
 
 #include <stdint.h>
 
@@ -18,4 +18,4 @@ typedef struct {
     headphones_audio_t audio;
 } headphones_info_t;
 
-#endif /* DISCOVERY_PROTOCOL_H */
+#endif /* CONFIG_DISCOVERY_PROTOCOL_H */

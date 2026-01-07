@@ -1,7 +1,7 @@
 #ifndef DISCOVERY_SERVER_H
 #define DISCOVERY_SERVER_H
 
-#include "discovery_protocol.h"
+#include "protocols/discovery.h"
 
 extern headphones_info_t g_device_info;
 

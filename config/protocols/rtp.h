@@ -1,5 +1,5 @@
-#ifndef REAL_TIME_PROTOCOL_H
-#define REAL_TIME_PROTOCOL_H
+#ifndef CONFIG_RTP_H
+#define CONFIG_RTP_H
 
 #include <stdint.h>
 
@@ -20,4 +20,4 @@ typedef struct {
     uint32_t ssrc;
 } __attribute__((packed)) rtp_header_t;
 
-#endif /* REAL_TIME_PROTOCOL_H */
+#endif /* CONFIG_RTP_H */

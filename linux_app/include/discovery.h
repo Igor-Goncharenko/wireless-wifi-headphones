@@ -1,5 +1,5 @@
-#ifndef WIFI_H
-#define WIFI_H
+#ifndef DISCOVERY_H
+#define DISCOVERY_H
 
 #include <pthread.h>
 #include <stdbool.h>
@@ -7,7 +7,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-#include "discovery_protocol.h"
+#include "protocols/discovery.h"
 
 #define MAX_DISCOVERY_DURATION 10
 
@@ -28,4 +28,4 @@ int discovery_data_init(discovery_data_t *data);
 void discovery_data_destroy(discovery_data_t *data);
 int discover_task(discovery_data_t *data, const int duration);
 
-#endif /* WIFI_H */
+#endif /* DISCOVERY_H */

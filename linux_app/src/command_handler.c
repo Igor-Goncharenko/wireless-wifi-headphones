@@ -9,7 +9,7 @@
 #include "discovery.h"
 #include "rtp_client.h"
 
-#include "daemon_protocol.h"
+#include "protocols/daemon.h"
 
 void *process_command_task(void *arg) {
     process_command_arg_t *pc_arg = (process_command_arg_t*) arg;

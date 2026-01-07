@@ -1,9 +1,9 @@
-#ifndef DAEMON_PROTOCOL_H
-#define DAEMON_PROTOCOL_H
+#ifndef CONFIG_DAEMON_PROTOCOL_H
+#define CONFIG_DAEMON_PROTOCOL_H
 
 #include <stdbool.h>
 
-#include "discovery_protocol.h"
+#include "discovery.h"
 
 #define DEFAULT_DISCOVERY_DURATION 5
 
@@ -56,4 +56,4 @@ typedef struct {
     };
 } daemon_rsp_t;
 
-#endif /* DAEMON_PROTOCOL_H */
+#endif /* CONFIG_DAEMON_PROTOCOL_H */

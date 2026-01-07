@@ -8,7 +8,7 @@
 #include <sys/un.h>
 
 #include "command.h"
-#include "daemon_protocol.h"
+#include "protocols/daemon.h"
 #include "info_msg.h"
 
 #define SOCKET_PATH "/tmp/wifi_headphones_daemon.sock"

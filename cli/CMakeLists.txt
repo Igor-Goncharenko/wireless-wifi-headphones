@@ -18,7 +18,7 @@ target_link_libraries(${PROJECT_NAME}
 target_include_directories(${PROJECT_NAME}
     PRIVATE
         include
-        ${CMAKE_SOURCE_DIR}/libs/protocols
+        ${CMAKE_SOURCE_DIR}/config
 )
 
 install(TARGETS ${PROJECT_NAME} DESTINATION bin)

@@ -11,7 +11,7 @@
 #include <syslog.h>
 
 #include "ringbuf.h"
-#include "real_time_protocol.h"
+#include "protocols/rtp.h"
 
 static int rtp_session_create(rtp_session_t *session, const char *server_ip, const int server_port) {
     if ((session->sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {

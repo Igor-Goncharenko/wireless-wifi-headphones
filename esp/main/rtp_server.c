@@ -8,7 +8,7 @@
 #include "sdkconfig.h"
 #include <string.h>
 
-#include "real_time_protocol.h"
+#include "protocols/rtp.h"
 
 static const char *TAG = "WHP " __FILE__;
 

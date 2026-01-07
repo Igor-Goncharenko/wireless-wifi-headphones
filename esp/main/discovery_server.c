@@ -9,7 +9,7 @@
 #include <stdio.h>
 
 #include "wifi.h"
-#include "discovery_protocol.h"
+#include "protocols/discovery.h"
 
 static const char *TAG = "WHP " __FILE__;
 

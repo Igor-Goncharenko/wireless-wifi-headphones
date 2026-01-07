@@ -8,6 +8,7 @@
 #include "sdkconfig.h"
 #include <stdio.h>
 
+#include "config.h"
 #include "wifi.h"
 #include "protocols/discovery.h"
 
@@ -16,9 +17,9 @@ static const char *TAG = "WHP " __FILE__;
 headphones_info_t g_device_info = {
     .name = CONFIG_HEADPHONES_NAME,
     .audio = {
-        .bit_width = CONFIG_AUDIO_SAMPLE_SIZE,
-        .sample_rate = htons(CONFIG_AUDIO_SAMPLE_RATE),
-        .channels = CONFIG_AUDIO_CHANNELS,
+        .bit_width = AUDIO_SAMPLE_SIZE,
+        .sample_rate = htons(AUDIO_SAMPLE_RATE),
+        .channels = AUDIO_CHANNELS,
     },
 };
 
@@ -55,7 +56,7 @@ void discovery_server_task(void *args) {
     memset(&server_addr, 0, sizeof(server_addr));
     server_addr.sin_family = AF_INET;
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    server_addr.sin_port = htons(CONFIG_DISCOVERY_PORT);
+    server_addr.sin_port = htons(DISCOVERY_PORT);
     
     if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         ESP_LOGE(TAG, "Bind failed");
@@ -65,7 +66,7 @@ void discovery_server_task(void *args) {
     }
     
     struct ip_mreq mreq;
-    mreq.imr_multiaddr.s_addr = inet_addr(CONFIG_MULTICAST_GROUP);
+    mreq.imr_multiaddr.s_addr = inet_addr(MULTICAST_GROUP);
     mreq.imr_interface.s_addr = htonl(INADDR_ANY);
     
     if (setsockopt(sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
@@ -75,7 +76,7 @@ void discovery_server_task(void *args) {
         return;
     }
     
-    ESP_LOGI(TAG, "Discovery server started on port %d", CONFIG_DISCOVERY_PORT);
+    ESP_LOGI(TAG, "Discovery server started on port %d", DISCOVERY_PORT);
     
     while (1) {
         recv_len = recvfrom(sockfd, buffer, sizeof(buffer) - 1, 0,
@@ -85,7 +86,7 @@ void discovery_server_task(void *args) {
             buffer[recv_len] = '\0';
             ESP_LOGI(TAG, "received discovery request: \"%s\"", buffer);
 
-            if (strcmp(buffer, CONFIG_DISCOVERY_REQUEST) == 0) {
+            if (strcmp(buffer, DISCOVERY_REQUEST) == 0) {
                 if (sendto(sockfd, &g_device_info, sizeof(headphones_info_t), 0,
                           (struct sockaddr *)&client_addr, client_len) < 0) {
                     ESP_LOGE(TAG, "Failed to send response");

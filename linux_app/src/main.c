@@ -12,16 +12,13 @@
 #include <sys/un.h>
 
 #include "audio.h"
+#include "config.h"
 #include "command_handler.h"
 #include "discovery.h"
 #include "ringbuf.h"
 #include "rtp_client.h"
 
-#define SOCKET_PATH "/tmp/" CONFIG_DAEMON_NAME ".sock"
-#define LOGFILE_PATH "/tmp/" CONFIG_DAEMON_NAME ".log"
-
 static volatile sig_atomic_t keep_running = 1;
-static FILE *logfile = NULL;
 
 struct rtp_send_thread {
     rtp_session_t *session;
@@ -57,12 +54,6 @@ int daemon_init(void) {
     chdir("/");
     umask(0);
 
-    logfile = fopen(LOGFILE_PATH, "a");
-    if (!logfile) {
-        fprintf(stderr, "Failed to open log file: errno=%d, strerror=\"%s\"",
-                errno, strerror(errno));
-    }
-
     close(STDIN_FILENO);
     close(STDOUT_FILENO);
     close(STDERR_FILENO);
@@ -71,13 +62,7 @@ int daemon_init(void) {
 }
 
 void daemon_cleanup(void) {
-    if (logfile != NULL) {
-        fclose(logfile);
-        logfile = NULL;
-        syslog(LOG_DEBUG, "log file closed");
-    }
-
-    unlink(SOCKET_PATH);
+    unlink(DAEMON_SOCKET_PATH);
     
     syslog(LOG_INFO, "Daemon cleanup complete");
 }
@@ -93,7 +78,7 @@ int create_socket(void) {
 
     memset(&addr, 0, sizeof(struct sockaddr_un));
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+    strncpy(addr.sun_path, DAEMON_SOCKET_PATH, sizeof(addr.sun_path) - 1);
 
     if (bind(sockfd, (struct sockaddr*)&addr, sizeof(addr)) < 0) {
         syslog(LOG_ERR, "Failed to bind unix socket");
@@ -113,7 +98,7 @@ void close_socket(int sockfd) {
     if (sockfd > 0) {
         close(sockfd);
     }
-    unlink(SOCKET_PATH);
+    unlink(DAEMON_SOCKET_PATH);
 
 }
 

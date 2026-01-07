@@ -3,8 +3,6 @@
 
 #include <stdint.h>
 
-#define MAX_HEADPHONES_RESPS 16
-
 typedef struct {
     uint16_t sample_rate;
     uint8_t channels;

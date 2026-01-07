@@ -12,9 +12,7 @@
 #include <sys/socket.h>
 #include <netinet/in.h>
 
-#define MULTICAST_GROUP "224.1.1.1"
-#define DISCOVERY_PORT 5000
-#define DISCOVERY_REQUEST "DISCOVER_HEADPHONES_REQUEST"
+#include "config.h"
 
 static int discovery_server_init(discovery_server_t *server) {
     if ((server->sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {

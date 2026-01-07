@@ -3,9 +3,8 @@
 
 #include <stdbool.h>
 
+#include "config.h"
 #include "discovery.h"
-
-#define DEFAULT_DISCOVERY_DURATION 5
 
 #define DAEMON_CMD_TYPE_LAST DAEMON_CMD_DISCONNECT
 typedef enum {

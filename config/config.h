@@ -1,5 +1,27 @@
 #ifndef CONFIG_H
 #define CONFIG_H
 
+#include "protocols/rtp.h"
+
+#define DAEMON_SOCKET_PATH "/tmp/wifi_headphones_daemon.sock"
+
+#define MULTICAST_GROUP "224.1.1.1"
+#define DISCOVERY_PORT 5000
+#define DISCOVERY_REQUEST "DISCOVER_HEADPHONES_REQUEST"
+
+#define MAX_DISCOVERY_DURATION 10
+#define MAX_HEADPHONES_RESPS 16
+
+#define AUDIO_CHANNELS 2
+#define AUDIO_SAMPLE_SIZE 2
+#define AUDIO_SAMPLE_RATE 44100
+
+#define RTP_PORT 5002
+#define RTP_VERSION 2
+#define RTP_PAYLOAD_TYPE 96
+
+#define FRAMES_PER_PACKET 256
+#define DATA_SIZE_PER_PACKET (FRAMES_PER_PACKET * AUDIO_CHANNELS * AUDIO_SAMPLE_SIZE)
+#define PACKET_SIZE (DATA_SIZE_PER_PACKET + sizeof(rtp_header_t))
 
 #endif /* CONFIG_H */

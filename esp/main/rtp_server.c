@@ -8,6 +8,7 @@
 #include "sdkconfig.h"
 #include <string.h>
 
+#include "config.h"
 #include "protocols/rtp.h"
 
 static const char *TAG = "WHP " __FILE__;
@@ -30,7 +31,7 @@ int rtp_server_init(rtp_server_t *rtp_ser, const RingbufHandle_t rb) {
     memset(&rtp_ser->server_addr, 0, sizeof(rtp_ser->server_addr));
     rtp_ser->server_addr.sin_family = AF_INET;
     rtp_ser->server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    rtp_ser->server_addr.sin_port = htons(CONFIG_RTP_PORT);
+    rtp_ser->server_addr.sin_port = htons(RTP_PORT);
 
     if (bind(rtp_ser->sockfd, (struct sockaddr *)&rtp_ser->server_addr, sizeof(rtp_ser->server_addr)) < 0) {
         ESP_LOGE(TAG, "RTP server bind failed");
@@ -45,7 +46,7 @@ int rtp_server_init(rtp_server_t *rtp_ser, const RingbufHandle_t rb) {
 
     rtp_ser->rb = rb;
 
-    ESP_LOGI(TAG, "RTP server initialized: sockfd=%d, port=%d", rtp_ser->sockfd, CONFIG_RTP_PORT);
+    ESP_LOGI(TAG, "RTP server initialized: sockfd=%d, port=%d", rtp_ser->sockfd, RTP_PORT);
     return 0;
 }
 
@@ -69,10 +70,10 @@ void rtp_receiver_task(void *arg) {
 
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
-    uint8_t buffer[PACKET_BUFFER_SIZE];
+    uint8_t buffer[PACKET_SIZE];
     ssize_t recv_len;
 
-    ESP_LOGI(TAG, "RTP server started on port %d", CONFIG_RTP_PORT);
+    ESP_LOGI(TAG, "RTP server started on port %d", RTP_PORT);
     
     while (1) {
         recv_len = recvfrom(server->sockfd, buffer, sizeof(buffer), 0,
@@ -100,7 +101,7 @@ void rtp_receiver_task(void *arg) {
                 ESP_LOGW(TAG, "Invalid RTP version");
                 continue;
             }
-            if (header->payload_types != CONFIG_RTP_PAYLOAD_TYPE) {
+            if (header->payload_types != RTP_PAYLOAD_TYPE) {
                 ESP_LOGW(TAG, "Unexpected payload type: %d", header->payload_types);
                 continue;
             }

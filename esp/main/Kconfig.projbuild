@@ -31,49 +31,6 @@ menu "WiFi Headphones Configuration"
                 password identifier for SAE H2E
     endmenu
 
-    menu "Network conf"
-        config MULTICAST_GROUP
-            string "Multicast group (discovery)"
-            default "224.1.1.1"
-
-        config DISCOVERY_PORT
-            int "Discovery server port"
-            default 5000
-        
-        config DISCOVERY_REQUEST
-            string "Discovery request"
-            default "DISCOVER_HEADPHONES_REQUEST"
-
-        config RTP_PORT
-            int "RTP port"
-            default 5002
-
-        config RTP_PAYLOAD_TYPE
-            int "RTP payload type"
-            default 96
-
-        config RTP_PACKET_SIZE
-            int "RTP packet size"
-            default 1024
-            range 256 2048
-    endmenu
-
-    menu "Sound conf"
-        config AUDIO_SAMPLE_RATE
-            int "Sample rate"
-            default 44100
-        
-        config AUDIO_CHANNELS
-            int "Channels"
-            default 2
-            range 1 2
-
-        config AUDIO_SAMPLE_SIZE
-            int "Sample size [bytes]"
-            default 2
-            range 1 4
-    endmenu
-
     menu "Hardware conf"
         config I2S_BCLK_GPIO
             int "I2S BCLK GPIO"

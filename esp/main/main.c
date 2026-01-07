@@ -6,6 +6,7 @@
 #include "driver/i2s_std.h"
 #include <inttypes.h>
 
+#include "config.h"
 #include "discovery_server.h"
 #include "rtp_server.h"
 #include "wifi.h"
@@ -16,19 +17,19 @@ static i2s_chan_handle_t s_tx_chan;
 
 #define RINGBUFFER_SIZE (64 * 1024)
 
-#if (CONFIG_AUDIO_CHANNELS == 1)
+#if (AUDIO_CHANNELS == 1)
 # define I2S_CHANNEL I2S_SLOT_MODE_MONO
-#elif (CONFIG_AUDIO_CHANNELS == 2)
+#elif (AUDIO_CHANNELS == 2)
 # define I2S_CHANNEL I2S_SLOT_MODE_STEREO
 #else
 # error "Incorrect number of audio channels"
 #endif
 
-#if (CONFIG_AUDIO_SAMPLE_SIZE == 1)
+#if (AUDIO_SAMPLE_SIZE == 1)
 # define I2S_SAMPLE_SIZE I2S_DATA_BIT_WIDTH_8BIT
-#elif (CONFIG_AUDIO_CHANNELS == 2)
+#elif (AUDIO_SAMPLE_SIZE == 2)
 # define I2S_SAMPLE_SIZE I2S_DATA_BIT_WIDTH_16BIT
-#elif (CONFIG_AUDIO_CHANNELS == 4)
+#elif (AUDIO_SAMPLE_SIZE == 4)
 # define I2S_SAMPLE_SIZE I2S_DATA_BIT_WIDTH_32BIT
 #else
 # error "Incorrect sample size configuration"
@@ -82,7 +83,7 @@ static void i2s_init_std_simplex(void) {
     ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &s_tx_chan, NULL));
 
     i2s_std_config_t tx_std_cfg = {
-        .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(CONFIG_AUDIO_SAMPLE_RATE),
+        .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO_SAMPLE_RATE),
         .slot_cfg = I2S_STD_MSB_SLOT_DEFAULT_CONFIG(I2S_SAMPLE_SIZE, I2S_CHANNEL),
         .gpio_cfg = {
             .mclk = I2S_GPIO_UNUSED,
@@ -102,7 +103,7 @@ static void i2s_init_std_simplex(void) {
     ESP_ERROR_CHECK(i2s_channel_enable(s_tx_chan));
 
     ESP_LOGI(TAG, "Initialized: sample_rate=%d, channels=%d, sample_size=%d",
-             CONFIG_AUDIO_SAMPLE_RATE, CONFIG_AUDIO_CHANNELS, CONFIG_AUDIO_SAMPLE_SIZE * 8);
+             AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_SAMPLE_SIZE * 8);
 }
 
 void app_main(void) {

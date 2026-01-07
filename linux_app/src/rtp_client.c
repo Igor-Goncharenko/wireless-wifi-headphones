@@ -10,8 +10,10 @@
 #include <sys/socket.h>
 #include <syslog.h>
 
+#include "config.h"
 #include "ringbuf.h"
 #include "protocols/rtp.h"
+#include "rtp_client.h"
 
 static int rtp_session_create(rtp_session_t *session, const char *server_ip, const int server_port) {
     if ((session->sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
@@ -41,8 +43,8 @@ static void rtp_session_destroy(rtp_session_t *session) {
     }
 }
 
-static ssize_t rtp_send_packet_small(rtp_session_t *session, const uint8_t *data, 
-                                     const size_t data_size, const int marker) {
+static ssize_t rtp_send_packet(rtp_session_t *session, const uint8_t *data, 
+                               const size_t data_size, const int marker) {
     uint8_t packet[PACKET_SIZE];
     rtp_header_t *header = (rtp_header_t*) packet;
 
@@ -58,58 +60,24 @@ static ssize_t rtp_send_packet_small(rtp_session_t *session, const uint8_t *data
 
     memcpy(packet + sizeof(rtp_header_t), data, data_size);
 
-    ssize_t sent = sendto(session->sockfd, packet, sizeof(rtp_header_t) + data_size, 0,
-            (struct sockaddr*)&session->server_addr, sizeof(session->server_addr));
+    ssize_t sent = sendto(session->sockfd, packet, data_size + sizeof(rtp_header_t), 0,
+                          (struct sockaddr*)&session->server_addr, sizeof(session->server_addr));
 
-    if (sent > 0) {
-        session->timestamp += data_size / (SAMPLE_SIZE * CHANNELS);
-    }
+    if (sent > 0)
+        session->timestamp += data_size / (AUDIO_SAMPLE_SIZE * AUDIO_CHANNELS);
 
     return sent;
 }
 
-static ssize_t rtp_send_packet(rtp_session_t *session, const uint8_t *data, 
-                        const size_t data_size, const int marker) {
-    if (data_size <= PACKET_SIZE) {
-        return (rtp_send_packet_small(session, data, data_size, marker) != 0) ? 1 : 0;
-    }
-
-    size_t total_sent = 0;
-    size_t remaining = data_size;
-    const uint8_t *current_pos = data;
-    int packet_count = 0;
-
-    while (remaining > 0) {
-        ssize_t fragment_size = (remaining > PACKET_SIZE) ?
-                                PACKET_SIZE : remaining;
-        
-        const int fragment_marker = (remaining == fragment_size) ? marker : 0;
-        
-        const ssize_t sent = rtp_send_packet_small(session, current_pos, fragment_size, fragment_marker);
-        
-        if (sent <= 0) return (total_sent > 0) ? total_sent : -1;
-        
-        const ssize_t payload_sent = sent - sizeof(rtp_header_t);
-        total_sent += payload_sent;
-        current_pos += payload_sent;
-        remaining -= payload_sent;
-        packet_count++;
-        
-        usleep(1000);
-    }
-    
-    return packet_count;
-}
-
 static void *rtp_sender_task(void *arg) {
     rtp_connection_data_t *conn_data = (rtp_connection_data_t*)arg;
-    uint8_t data[FRAMES_PER_PACKET];
+    uint8_t data[DATA_SIZE_PER_PACKET];
     size_t read;
 
     while (conn_data->is_running) {
         pthread_mutex_lock(&conn_data->mutex);
 
-        read = ringbuf_read_block(conn_data->rb_ptr, data, FRAMES_PER_PACKET);
+        read = ringbuf_read_block(conn_data->rb_ptr, data, DATA_SIZE_PER_PACKET);
         rtp_send_packet(&conn_data->active_session, data, read, 0);
 
         pthread_mutex_unlock(&conn_data->mutex);

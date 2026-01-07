@@ -9,7 +9,7 @@
 
 #include "protocols/discovery.h"
 
-#define MAX_DISCOVERY_DURATION 10
+#include "config.h"
 
 typedef struct {
     int sockfd;

@@ -8,16 +8,6 @@
 
 #include "ringbuf.h"
 
-#define RTP_PORT 5002
-#define RTP_VERSION 2
-#define RTP_PAYLOAD_TYPE 96  // Dynamic payload type for PCM
-#define AUDIO_SAMPLE_RATE 44100
-#define CHANNELS 2
-#define SAMPLE_SIZE 2  // 16-bit PCM
-
-#define FRAMES_PER_PACKET 1024
-#define PACKET_SIZE (FRAMES_PER_PACKET + sizeof(rtp_header_t))
-
 typedef struct {
     int sockfd;
     struct sockaddr_in server_addr;

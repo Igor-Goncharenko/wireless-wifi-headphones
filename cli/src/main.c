@@ -7,11 +7,10 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 
+#include "config.h"
 #include "command.h"
 #include "protocols/daemon.h"
 #include "info_msg.h"
-
-#define SOCKET_PATH "/tmp/wifi_headphones_daemon.sock"
 
 static volatile sig_atomic_t s_keep_running = 1;
 
@@ -81,7 +80,7 @@ int send_command_to_daemon(const daemon_cmd_t *cmd) {
 
     memset(&addr, 0, sizeof(addr));
     addr.sun_family = AF_UNIX;
-    strncpy(addr.sun_path, SOCKET_PATH, sizeof(addr.sun_path) - 1);
+    strncpy(addr.sun_path, DAEMON_SOCKET_PATH, sizeof(addr.sun_path) - 1);
 
     if (connect(sock, (struct sockaddr*)&addr, sizeof(addr)) == -1) {
         perror("connect");

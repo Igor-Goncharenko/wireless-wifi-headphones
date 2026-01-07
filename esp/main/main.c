@@ -23,17 +23,19 @@ static i2s_chan_handle_t s_tx_chan;
 # define I2S_CHANNEL I2S_SLOT_MODE_STEREO
 #else
 # error "Incorrect number of audio channels"
-#endif
+#endif /* AUDIO_CHANNELS */
 
 #if (AUDIO_SAMPLE_SIZE == 1)
 # define I2S_SAMPLE_SIZE I2S_DATA_BIT_WIDTH_8BIT
 #elif (AUDIO_SAMPLE_SIZE == 2)
 # define I2S_SAMPLE_SIZE I2S_DATA_BIT_WIDTH_16BIT
+#elif (AUDIO_SAMPLE_SIZE == 3)
+# define I2S_SAMPLE_SIZE I2S_DATA_BIT_WIDTH_24BIT
 #elif (AUDIO_SAMPLE_SIZE == 4)
 # define I2S_SAMPLE_SIZE I2S_DATA_BIT_WIDTH_32BIT
 #else
 # error "Incorrect sample size configuration"
-#endif
+#endif /* AUDIO_SAMPLE_SIZE */
 
 RingbufHandle_t rb = NULL;
 rtp_server_t rtp = { 0 };

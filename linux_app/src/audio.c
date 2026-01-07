@@ -11,10 +11,24 @@
 #include <pulse/thread-mainloop.h>
 #include <pulse/volume.h>
 
+#include "config.h"
+
 #define CONTEXT_NAME "WiFi Headphones Output"
 #define DEVICE_NAME "WifiHeadphones"
 #define DEVICE_DESC "WiFi-Headphones"
 #define STREAM_NAME DEVICE_NAME "Monitor"
+
+#if (AUDIO_SAMPLE_SIZE == 1)
+# define PULSE_SAMPLE_SIZE PA_SAMPLE_U8
+#elif (AUDIO_SAMPLE_SIZE == 2)
+# define PULSE_SAMPLE_SIZE PA_SAMPLE_S16LE
+#elif (AUDIO_SAMPLE_SIZE == 3)
+# define PULSE_SAMPLE_SIZE PA_SAMPLE_S24LE
+#elif (AUDIO_SAMPLE_SIZE == 4)
+# define PULSE_SAMPLE_SIZE PA_SAMPLE_S32LE
+#else
+# error "Incorrect sample size"
+#endif /* AUDIO_SAMPLE_SIZE */
 
 static void stream_read_cb(pa_stream *s, size_t length, void *userdata) {
     pulse_audio_t *pulse = (pulse_audio_t*) userdata;
@@ -111,9 +125,9 @@ static void remove_virtual_sink(pulse_audio_t *pulse) {
 
 static int create_monitor_stream(pulse_audio_t *pulse) {
     pa_sample_spec sample_spec = {
-        .format = PA_SAMPLE_S16LE,
-        .rate = 44100,
-        .channels = 2
+        .format = PULSE_SAMPLE_SIZE,
+        .rate = AUDIO_SAMPLE_RATE,
+        .channels = AUDIO_CHANNELS,
     };
     
     pulse->stream = pa_stream_new(pulse->context, STREAM_NAME, 

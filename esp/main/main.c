@@ -10,6 +10,7 @@
 #include "discovery_server.h"
 #include "rtp_server.h"
 #include "wifi.h"
+#include "event_mgr.h"
 
 static const char *TAG = "WHP " __FILE__;
 
@@ -117,6 +118,8 @@ void app_main(void) {
       ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    xTaskCreate(event_mgr_task, "event_mgr_task", 4096, NULL, 5, NULL);
 
     wifi_init_sta();
     i2s_init_std_simplex();

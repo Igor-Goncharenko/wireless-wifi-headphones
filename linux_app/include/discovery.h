@@ -27,5 +27,6 @@ typedef struct {
 int discovery_data_init(discovery_data_t *data);
 void discovery_data_destroy(discovery_data_t *data);
 int discover_task(discovery_data_t *data, const int duration);
+bool handshake(const char ip4[16], const discovery_data_t *data);
 
 #endif /* DISCOVERY_H */

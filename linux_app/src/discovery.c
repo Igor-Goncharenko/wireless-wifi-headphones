@@ -156,7 +156,7 @@ int discover_task(discovery_data_t *data, const int duration) {
     data->is_discovering = true;
 
     if (discovery_server_init(&server) != 0) {
-        syslog(LOG_ERR, "Failed to init discovery server. errno=%d, strerror=%s\n",
+        syslog(LOG_ERR, "Failed to init discovery server. errno=%d, strerror=%s",
                errno, strerror(errno));
         discovery_server_destroy(&server);
         pthread_mutex_unlock(&data->mutex);
@@ -172,4 +172,60 @@ int discover_task(discovery_data_t *data, const int duration) {
     discovery_server_destroy(&server);
 
     return 0;
+}
+
+static bool check_ip_exist(const char ip4[16], const discovery_data_t *data) {
+    for (int i = 0; i < data->count; i++) {
+        if (strcmp(data->data[i].ipv4, ip4) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool handshake(const char ip4[16], const discovery_data_t *data) {
+    if (!check_ip_exist(ip4, data)) {
+        syslog(LOG_WARNING, "Trying to connect to a non-existent IP");
+        return false;
+    }
+
+    int sockfd = 0;
+    struct sockaddr_in serv_addr;
+    char buffer[128];
+
+    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+        syslog(LOG_ERR, "Socket creation error");
+        return false;
+    }
+
+    serv_addr.sin_family = AF_INET;
+    serv_addr.sin_port = htons(HANDSHAKE_PORT);
+
+    if (inet_pton(AF_INET, ip4, &serv_addr.sin_addr) <= 0) {
+        syslog(LOG_ERR, "Invalid address/Address not supported");
+        close(sockfd);
+        return false;
+    }
+
+    if (connect(sockfd, (struct sockaddr *)&serv_addr, sizeof(serv_addr)) < 0) {
+        syslog(LOG_ERR, "Connection Failed");
+        close(sockfd);
+        return false;
+    }
+
+    int bytes_sent = send(sockfd, HANDSHAKE_REQUEST, sizeof(HANDSHAKE_REQUEST), 0);
+    if (bytes_sent < 0) {
+        syslog(LOG_ERR, "Send failed");
+        return false;
+    }
+
+    int bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
+    if (bytes_received < 0) {
+        syslog(LOG_ERR, "Receive failed");
+        return false;
+    }
+    buffer[bytes_received] = '\0';
+
+    close(sockfd);
+    return strcmp(buffer, HANDSHAKE_RESPONSE) == 0;
 }

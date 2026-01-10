@@ -47,7 +47,7 @@ static void init_device_info(void) {
              g_device_info.mac, g_device_info.ipv4);
 }
 
-static void update_whitelist(const struct in_addr addr) {
+static void add_to_whitelist(const struct in_addr addr) {
     if (xSemaphoreTake(s_whitelist_mutex, pdMS_TO_TICKS(100)) == pdFALSE) {
         ESP_LOGW(TAG, "Failed to take whitelist mutex");
         return;
@@ -87,7 +87,46 @@ static void update_whitelist(const struct in_addr addr) {
     xSemaphoreGive(s_whitelist_mutex);
 }
 
-static void discovery_server_task(void) {
+static void update_whitelist(void) {
+    if (xSemaphoreTake(s_whitelist_mutex, pdMS_TO_TICKS(100)) == pdFALSE) {
+        ESP_LOGW(TAG, "Failed to take whitelist mutex");
+        return;
+    }
+
+    const time_t now = time(NULL);
+    int i = 0;
+
+    while (i < s_whitelist_len) {
+        if (now - s_whitelist[i].timestamp > WHITELIST_TIMEOUT) {
+            s_whitelist_len--;
+            if (i != s_whitelist_len) {
+                memcpy(&s_whitelist[i], &s_whitelist[s_whitelist_len - 1], sizeof(whitelist_entry_t));
+            }
+            i--;
+        }
+        i++;
+    }
+
+    xSemaphoreGive(s_whitelist_mutex);
+}
+
+static bool in_whitelist(const struct in_addr addr) {
+    if (xSemaphoreTake(s_whitelist_mutex, pdMS_TO_TICKS(100)) == pdFALSE) {
+        ESP_LOGW(TAG, "Failed to take whitelist mutex");
+        return false;
+    }
+
+    for (int i = 0; i < s_whitelist_len; i++) {
+        if (memcmp(&addr, &s_whitelist[i].addr, sizeof(struct in_addr)) == 0) {
+            return true;
+        }
+    }
+
+    xSemaphoreGive(s_whitelist_mutex);
+    return false;
+}
+
+static void discovery_server_task(void *arg) {
     int sockfd;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
@@ -98,6 +137,7 @@ static void discovery_server_task(void) {
     
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         ESP_LOGE(TAG, "Failed to create socket");
+        vTaskDelete(NULL);
         return;
     }
     
@@ -109,6 +149,7 @@ static void discovery_server_task(void) {
     if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         ESP_LOGE(TAG, "Bind failed");
         close(sockfd);
+        vTaskDelete(NULL);
         return;
     }
     
@@ -119,6 +160,7 @@ static void discovery_server_task(void) {
     if (setsockopt(sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
         ESP_LOGE(TAG, "Multicast group join failed");
         close(sockfd);
+        vTaskDelete(NULL);
         return;
     }
     
@@ -143,7 +185,7 @@ static void discovery_server_task(void) {
                           (struct sockaddr *)&client_addr, client_len) < 0) {
                     ESP_LOGE(TAG, "Failed to send response");
                 } else {
-                    update_whitelist(client_addr.sin_addr);
+                    add_to_whitelist(client_addr.sin_addr);
                 }
             }
         } else if (recv_len < 0) {
@@ -154,10 +196,106 @@ static void discovery_server_task(void) {
     }
     
     close(sockfd);
+    ESP_LOGI(TAG, "Discovery server stopped");
+    vTaskDelete(NULL);
+}
+
+static void handshake_server_task(void *arg) {
+    int sockfd;
+    char buffer[128];
+    int recv_len;
+
+    if ((sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+        ESP_LOGE(TAG, "Failed to create socket");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    int opt = 1;
+    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+
+    struct sockaddr_in server_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(HANDSHAKE_PORT),
+        .sin_addr.s_addr = htonl(INADDR_ANY),
+    };
+
+    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        ESP_LOGE(TAG, "Bind failed: errno %d", errno);
+        close(sockfd);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    if (listen(sockfd, 5) < 0) {
+        ESP_LOGE(TAG, "Listen failed: errno %d", errno);
+        close(sockfd);
+        vTaskDelete(NULL);
+        return;
+    }
+
+    ESP_LOGI(TAG, "Handshake task started");
+
+    while (1) {
+        EventBits_t bits = xEventGroupGetBits(g_system_events);
+        if (bits & EVENT_CLIENT_CONNECTED) {
+            break;
+        }
+
+        struct sockaddr_in client_addr;
+        socklen_t client_len = sizeof(client_addr);
+
+        int client_sock = accept(sockfd, (struct sockaddr *)&client_addr, &client_len);
+        if (client_sock < 0) {
+            ESP_LOGE(TAG, "Accept failed: errno %d", errno);
+            continue;
+        }
+
+        char client_ip[INET_ADDRSTRLEN];
+        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
+
+        recv_len = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
+
+        if (recv_len > 0) {
+            buffer[recv_len] = '\0';
+            ESP_LOGI(TAG, "received handshake request: \"%s\"", buffer);
+
+            if (strcmp(buffer, HANDSHAKE_REQUEST) == 0) {
+                update_whitelist();
+
+                if (send(client_sock, HANDSHAKE_RESPONSE, sizeof(HANDSHAKE_RESPONSE), 0) < 0) {
+                    ESP_LOGE(TAG, "HANDSHAKE_RESPONSE send failed");
+                }
+
+                if (in_whitelist(client_addr.sin_addr)) {
+                    if (xSemaphoreTake(g_conn_cfg.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                        xEventGroupSetBits(g_system_events, EVENT_CLIENT_CONNECTED);
+                        memcpy(&g_conn_cfg.host_ip, &client_addr.sin_addr, sizeof(struct in_addr));
+                        ESP_LOGI(TAG, "Connection accepted from %s", client_ip);
+                        xSemaphoreGive(g_conn_cfg.mutex);
+                    } else {
+                        ESP_LOGW(TAG, "Failed to lock g_conn_cfg mutex");
+                    }
+                } else {
+                    ESP_LOGW(TAG, "Connection accepted from %s (not on whitelist)", client_ip);
+                }
+            }
+        } else if (recv_len < 0) {
+            ESP_LOGE(TAG, "recvfrom failed: errno=%d", errno);
+        }
+
+        close(client_sock);
+    }
+
+    close(sockfd);
+    ESP_LOGI(TAG, "Handshake task stopped");
+    vTaskDelete(NULL);
 }
 
 void discovery_server_mgr_task(void *arg) {
     EventBits_t bits;
+    TaskHandle_t handshake_hndl = NULL;
+    TaskHandle_t discovery_hndl = NULL;
     s_whitelist_mutex = xSemaphoreCreateMutex();
     if (s_whitelist_mutex == NULL) {
         ESP_LOGE(TAG, "Failed to create whitelist mutex");
@@ -175,16 +313,19 @@ void discovery_server_mgr_task(void *arg) {
 
         xEventGroupClearBits(g_system_events, EVENT_DISCOVERY_START);
 
-        ESP_LOGI(TAG, "discovery_server_task started");
-        discovery_server_task();
-        ESP_LOGI(TAG, "discovery_server_task stopped");
+        xTaskCreate(handshake_server_task, "handshake_server_task", 4096, NULL, 5, &handshake_hndl);
+        xTaskCreate(discovery_server_task, "discovery_server_task", 4096, NULL, 5, &discovery_hndl);
 
-        bits = xEventGroupGetBits(g_system_events);
-        if (!(bits & EVENT_CLIENT_CONNECTED)) {
-            ESP_LOGW(TAG, "Discovery stopped without client connection");
-            xEventGroupSetBits(g_system_events, EVENT_DISCOVERY_START);
-            vTaskDelay(pdMS_TO_TICKS(5000));
-        }
+        bits = xEventGroupWaitBits(
+            g_system_events,
+            EVENT_CLIENT_CONNECTED,
+            pdFALSE,
+            pdTRUE,
+            portMAX_DELAY
+        );
+
+        vTaskDelete(handshake_hndl);
+        vTaskDelete(discovery_hndl);
     }
 
     vSemaphoreDelete(s_whitelist_mutex);

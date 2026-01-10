@@ -11,6 +11,7 @@
 #include "config.h"
 #include "wifi.h"
 #include "protocols/discovery.h"
+#include "event_mgr.h"
 
 static const char *TAG = "WHP " __FILE__;
 
@@ -38,7 +39,7 @@ static void init_device_info(void) {
              g_device_info.mac, g_device_info.ipv4);
 }
 
-void discovery_server_task(void *args) {
+static void discovery_server_task(void) {
     int sockfd;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
@@ -49,7 +50,6 @@ void discovery_server_task(void *args) {
     
     if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         ESP_LOGE(TAG, "Failed to create socket");
-        vTaskDelete(NULL);
         return;
     }
     
@@ -61,7 +61,6 @@ void discovery_server_task(void *args) {
     if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
         ESP_LOGE(TAG, "Bind failed");
         close(sockfd);
-        vTaskDelete(NULL);
         return;
     }
     
@@ -72,15 +71,20 @@ void discovery_server_task(void *args) {
     if (setsockopt(sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
         ESP_LOGE(TAG, "Multicast group join failed");
         close(sockfd);
-        vTaskDelete(NULL);
         return;
     }
     
     ESP_LOGI(TAG, "Discovery server started on port %d", DISCOVERY_PORT);
     
     while (1) {
+        EventBits_t bits = xEventGroupGetBits(g_system_events);
+        if (bits & EVENT_CLIENT_CONNECTED) {
+            ESP_LOGI(TAG, "Client connected, stopping discovery");
+            break;
+        }
+
         recv_len = recvfrom(sockfd, buffer, sizeof(buffer) - 1, 0,
-                           (struct sockaddr *)&client_addr, &client_len);
+                            (struct sockaddr *)&client_addr, &client_len);
         
         if (recv_len > 0) {
             buffer[recv_len] = '\0';
@@ -91,17 +95,42 @@ void discovery_server_task(void *args) {
                           (struct sockaddr *)&client_addr, client_len) < 0) {
                     ESP_LOGE(TAG, "Failed to send response");
                 } else {
-                    // ESP_LOGI(TAG, "Discovery response sent to " IPSTR,
-                    //          IP2STR(&client_addr.sin_addr.s_addr));
+                    //xEventGroupSetBits(g_system_events, EVENT_CLIENT_CONNECTED);
                 }
             }
         } else if (recv_len < 0) {
             ESP_LOGE(TAG, "recvfrom failed: errno=%d", errno);
         }
         
-        vTaskDelay(10 / portTICK_PERIOD_MS);
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
     
     close(sockfd);
-    vTaskDelete(NULL);
+}
+
+void discovery_server_mgr_task(void *arg) {
+    EventBits_t bits;
+
+    while (1) {
+        bits = xEventGroupWaitBits(
+            g_system_events,
+            EVENT_WIFI_CONNECTED | EVENT_DISCOVERY_START,
+            pdFALSE,
+            pdTRUE,
+            portMAX_DELAY
+        );
+
+        xEventGroupClearBits(g_system_events, EVENT_DISCOVERY_START);
+
+        ESP_LOGI(TAG, "discovery_server_task started");
+        discovery_server_task();
+        ESP_LOGI(TAG, "discovery_server_task stopped");
+
+        bits = xEventGroupGetBits(g_system_events);
+        if (!(bits & EVENT_CLIENT_CONNECTED)) {
+            ESP_LOGW(TAG, "Discovery stopped without client connection");
+            xEventGroupSetBits(g_system_events, EVENT_DISCOVERY_START);
+            vTaskDelay(pdMS_TO_TICKS(5000));
+        }
+    }
 }

@@ -120,24 +120,49 @@ void app_main(void) {
     ESP_ERROR_CHECK(ret);
 
     xTaskCreate(event_mgr_task, "event_mgr_task", 4096, NULL, 5, NULL);
+    xTaskCreate(discovery_server_mgr_task, "discovery_server", 4096, NULL, 5, NULL);
 
     wifi_init_sta();
-    i2s_init_std_simplex();
-    vTaskDelay(pdMS_TO_TICKS(500));
+    //i2s_init_std_simplex();
+    //vTaskDelay(pdMS_TO_TICKS(500));
 
-    if (init_ringbuf(&rb) != 0) {
-        ESP_LOGE(TAG, "Failed to create ringbuf");
-        return;
+    //if (init_ringbuf(&rb) != 0) {
+    //    ESP_LOGE(TAG, "Failed to create ringbuf");
+    //    return;
+    //}
+    //vTaskDelay(pdMS_TO_TICKS(500));
+
+    //if (rtp_server_init(&rtp, rb) != 0) {
+    //    ESP_LOGE(TAG, "Failed to init rtp server");
+    //    return;
+    //}
+    //vTaskDelay(pdMS_TO_TICKS(500));
+
+    xEventGroupSetBits(g_system_events, EVENT_DISCOVERY_START);
+
+    while (1) {
+        EventBits_t bits = xEventGroupGetBits(g_system_events);
+        if (bits & EVENT_WIFI_CONNECTED)
+            ESP_LOGI(TAG, "EVENT_WIFI_CONNECTED");
+
+        if (bits & EVENT_WIFI_FAILED)
+            ESP_LOGI(TAG, "EVENT_WIFI_FAILED");
+
+        if (bits & EVENT_DISCOVERY_START)
+            ESP_LOGI(TAG, "EVENT_DISCOVERY_START");
+
+        if (bits & EVENT_CLIENT_CONNECTED)
+            ESP_LOGI(TAG, "EVENT_CLIENT_CONNECTED");
+
+        if (bits & EVENT_RTP_UP)
+            ESP_LOGI(TAG, "EVENT_RTP_UP");
+
+        if (bits & EVENT_AUDIO_UP)
+            ESP_LOGI(TAG, "EVENT_AUDIO_UP");
+
+        vTaskDelay(pdMS_TO_TICKS(2000));
     }
-    vTaskDelay(pdMS_TO_TICKS(500));
 
-    if (rtp_server_init(&rtp, rb) != 0) {
-        ESP_LOGE(TAG, "Failed to init rtp server");
-        return;
-    }
-    vTaskDelay(pdMS_TO_TICKS(500));
-
-    xTaskCreate(discovery_server_task, "discovery_server", 4096, NULL, 5, NULL);
-    xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, &rtp, 5, NULL);
-    xTaskCreate(audio_play, "audio_play", 4096, &rb, 6, NULL);
+    //xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, &rtp, 5, NULL);
+    //xTaskCreate(audio_play, "audio_play", 4096, &rb, 6, NULL);
 }

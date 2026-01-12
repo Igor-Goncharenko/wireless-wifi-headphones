@@ -205,7 +205,7 @@ static void handshake_server_task(void *arg) {
     char buffer[128];
     int recv_len;
 
-    if ((sockfd = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP)) < 0) {
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         ESP_LOGE(TAG, "Failed to create socket");
         vTaskDelete(NULL);
         return;
@@ -227,13 +227,6 @@ static void handshake_server_task(void *arg) {
         return;
     }
 
-    if (listen(sockfd, 5) < 0) {
-        ESP_LOGE(TAG, "Listen failed: errno %d", errno);
-        close(sockfd);
-        vTaskDelete(NULL);
-        return;
-    }
-
     ESP_LOGI(TAG, "Handshake task started");
 
     while (1) {
@@ -245,16 +238,11 @@ static void handshake_server_task(void *arg) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
 
-        int client_sock = accept(sockfd, (struct sockaddr *)&client_addr, &client_len);
-        if (client_sock < 0) {
-            ESP_LOGE(TAG, "Accept failed: errno %d", errno);
-            continue;
-        }
+        recv_len = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr,
+                            &client_len);
 
         char client_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
-
-        recv_len = recv(client_sock, buffer, sizeof(buffer) - 1, 0);
 
         if (recv_len > 0) {
             buffer[recv_len] = '\0';
@@ -263,11 +251,14 @@ static void handshake_server_task(void *arg) {
             if (strcmp(buffer, HANDSHAKE_REQUEST) == 0) {
                 update_whitelist();
 
-                if (send(client_sock, HANDSHAKE_RESPONSE, sizeof(HANDSHAKE_RESPONSE), 0) < 0) {
-                    ESP_LOGE(TAG, "HANDSHAKE_RESPONSE send failed");
-                }
-
                 if (in_whitelist(client_addr.sin_addr)) {
+                    ssize_t bytes_sent = sendto(sockfd, HANDSHAKE_RESPONSE,
+                                                sizeof(HANDSHAKE_RESPONSE), 0,
+                                                (struct sockaddr *)&client_addr, client_len);
+                    if (bytes_sent < 0) {
+                        ESP_LOGE(TAG, "HANDSHAKE_RESPONSE send failed");
+                    }
+
                     if (xSemaphoreTake(g_conn_cfg.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                         xEventGroupSetBits(g_system_events, EVENT_CLIENT_CONNECTED);
                         memcpy(&g_conn_cfg.host_ip, &client_addr.sin_addr, sizeof(struct in_addr));
@@ -283,8 +274,6 @@ static void handshake_server_task(void *arg) {
         } else if (recv_len < 0) {
             ESP_LOGE(TAG, "recvfrom failed: errno=%d", errno);
         }
-
-        close(client_sock);
     }
 
     close(sockfd);

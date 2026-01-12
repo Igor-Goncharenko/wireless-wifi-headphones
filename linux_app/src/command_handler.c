@@ -32,7 +32,7 @@ void *process_command_task(void *arg) {
                    pc_arg->disc_data->count * sizeof(headphones_info_t));
             break;
         case DAEMON_CMD_CONNECT:
-            if (handshake(pc_arg->cmd.connect.ip4, pc_arg->disc_data)) {
+            if (handshake(pc_arg->cmd.connect.ip4)) {
                 syslog(LOG_INFO, "Handshake with %s success", pc_arg->cmd.connect.ip4);
                 resp.connect.success = true;
                 // if (rtp_connection_start(pc_arg->conn_data, pc_arg->cmd.connect.ip4) != 0) {

@@ -14,6 +14,9 @@
 
 #include "config.h"
 
+#define MAX_HANDSHAKE_RETRIES 3
+#define HANDSHAKE_RESPONSE_TIMEOUT 2000
+
 static int discovery_server_init(discovery_server_t *server) {
     if ((server->sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         syslog(LOG_ERR, "Failed to create discovery socket: errno=%d, strerror=\"%s\"",
@@ -174,32 +177,46 @@ int discover_task(discovery_data_t *data, const int duration) {
     return 0;
 }
 
-static bool check_ip_exist(const char ip4[16], const discovery_data_t *data) {
-    for (int i = 0; i < data->count; i++) {
-        if (strcmp(data->data[i].ipv4, ip4) == 0) {
-            return true;
+static ssize_t send_and_wait_resp(int sockfd, struct sockaddr_in *dest, uint8_t *req,
+                                  ssize_t req_len, uint8_t *resp, ssize_t resp_len) {
+    for (int retry = 0; retry < MAX_HANDSHAKE_RETRIES; retry++) {
+        if (sendto(sockfd, req, req_len, 0, (struct sockaddr*)dest, sizeof(*dest)) <= 0) {
+            syslog(LOG_ERR, "sendto error: errno=%d", errno);
+            continue;
         }
+
+        socklen_t addr_len = sizeof(*dest);
+        ssize_t received = recvfrom(sockfd, resp, resp_len, 0, (struct sockaddr*)dest, &addr_len);
+
+        if (received > 0) {
+            return received;
+        }
+
+        syslog(LOG_WARNING, "Handshake timeout, retry %d/%d\n", retry + 1, MAX_HANDSHAKE_RETRIES);
+
+        usleep(100000 * (1 << retry)); // 100ms, 200ms, 400ms
     }
-    return false;
+    return -1;
 }
 
-bool handshake(const char ip4[16], const discovery_data_t *data) {
-    if (!check_ip_exist(ip4, data)) {
-        syslog(LOG_WARNING, "Trying to connect to a non-existent IP");
-        return false;
-    }
-
+bool handshake(const char ip4[16]) {
     int sockfd = 0;
     struct sockaddr_in serv_addr;
-    char buffer[128];
+    char buffer[sizeof(HANDSHAKE_RESPONSE) + 1];
 
-    if ((sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
+    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         syslog(LOG_ERR, "Socket creation error");
         return false;
     }
 
     serv_addr.sin_family = AF_INET;
     serv_addr.sin_port = htons(HANDSHAKE_PORT);
+
+    struct timeval tv = {
+        .tv_sec = HANDSHAKE_RESPONSE_TIMEOUT / 1000,
+        .tv_usec = HANDSHAKE_RESPONSE_TIMEOUT % 1000,
+    };
+    setsockopt(sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
 
     if (inet_pton(AF_INET, ip4, &serv_addr.sin_addr) <= 0) {
         syslog(LOG_ERR, "Invalid address/Address not supported");
@@ -213,18 +230,14 @@ bool handshake(const char ip4[16], const discovery_data_t *data) {
         return false;
     }
 
-    int bytes_sent = send(sockfd, HANDSHAKE_REQUEST, sizeof(HANDSHAKE_REQUEST), 0);
-    if (bytes_sent < 0) {
-        syslog(LOG_ERR, "Send failed");
+    ssize_t bytes_recv = send_and_wait_resp(sockfd, &serv_addr, (uint8_t *)HANDSHAKE_REQUEST,
+                                            sizeof(HANDSHAKE_REQUEST), (uint8_t *)buffer,
+                                            sizeof(HANDSHAKE_RESPONSE));
+    if (bytes_recv <= 0) {
+        syslog(LOG_WARNING, "Failed to recv handshake response");
+        close(sockfd);
         return false;
     }
-
-    int bytes_received = recv(sockfd, buffer, sizeof(buffer) - 1, 0);
-    if (bytes_received < 0) {
-        syslog(LOG_ERR, "Receive failed");
-        return false;
-    }
-    buffer[bytes_received] = '\0';
 
     close(sockfd);
     return strcmp(buffer, HANDSHAKE_RESPONSE) == 0;

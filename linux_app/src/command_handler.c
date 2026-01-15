@@ -34,16 +34,17 @@ void *process_command_task(void *arg) {
         case DAEMON_CMD_CONNECT:
             if (handshake(pc_arg->cmd.connect.ip4)) {
                 syslog(LOG_INFO, "Handshake with %s success", pc_arg->cmd.connect.ip4);
-                resp.connect.success = true;
-                // if (rtp_connection_start(pc_arg->conn_data, pc_arg->cmd.connect.ip4) != 0) {
-                //     syslog(LOG_ERR, "Failed to start connection");
-                //     resp.connect.success = false;
-                // } else {
-                //     syslog(LOG_INFO, "Successfully connected to device with ip=%s", pc_arg->cmd.connect.ip4);
-                //     resp.connect.success = true;
-                // }
+                //resp.connect.success = true;
+                if (rtp_connection_start(pc_arg->conn_data, pc_arg->cmd.connect.ip4) != 0) {
+                    syslog(LOG_ERR, "Failed to start connection");
+                    resp.connect.success = false;
+                } else {
+                    syslog(LOG_INFO, "Successfully connected to device with ip=%s", pc_arg->cmd.connect.ip4);
+                    resp.connect.success = true;
+                }
             } else {
                 syslog(LOG_WARNING, "Handshake with %s failed", pc_arg->cmd.connect.ip4);
+                resp.connect.success = false;
             }
             break;
         case DAEMON_CMD_DISCONNECT:

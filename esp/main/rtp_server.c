@@ -3,17 +3,23 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/ringbuf.h"
+#include "freertos/event_groups.h"
 #include "esp_log.h"
 #include "lwip/sockets.h"
-#include "sdkconfig.h"
 #include <string.h>
 
 #include "config.h"
+#include "event_mgr.h"
 #include "protocols/rtp.h"
 
 static const char *TAG = "WHP " __FILE__;
 
 #define PACKET_BUFFER_SIZE (CONFIG_RTP_PACKET_SIZE + sizeof(rtp_header_t) + 1)
+
+typedef struct {
+    rtp_server_t *server;
+    bool *running;
+} rtp_receiver_data_t;
 
 int rtp_server_init(rtp_server_t *rtp_ser, const RingbufHandle_t rb) {
     memset(rtp_ser, 0, sizeof(rtp_server_t));
@@ -60,7 +66,9 @@ void rtp_server_destroy(rtp_server_t *rtp_ser) {
 }
 
 void rtp_receiver_task(void *arg) {
-    rtp_server_t *server = (rtp_server_t*)arg;
+    rtp_receiver_data_t *data = (rtp_receiver_data_t *)arg;
+    rtp_server_t *server = data->server;
+    bool *running = data->running;
 
     if (server == NULL || server->sockfd < 0 || server->rb == NULL) {
         ESP_LOGE(TAG, "Invalid server state");
@@ -75,7 +83,7 @@ void rtp_receiver_task(void *arg) {
 
     ESP_LOGI(TAG, "RTP server started on port %d", RTP_PORT);
     
-    while (1) {
+    while (*running) {
         recv_len = recvfrom(server->sockfd, buffer, sizeof(buffer), 0,
                             (struct sockaddr *)&client_addr, &client_len);
         
@@ -133,4 +141,39 @@ void rtp_receiver_task(void *arg) {
     
     ESP_LOGI(TAG, "RTP server stopped");
     vTaskDelete(NULL);
+}
+
+void rtp_server_mgr_task(void *arg) {
+    rtp_server_t *server = (rtp_server_t*)arg;
+    TaskHandle_t rtp_hndl = NULL;
+
+    while (1) {
+        xEventGroupWaitBits(
+            g_event_mgr.signals,
+            SIG_START_RTP,
+            pdTRUE,
+            pdTRUE,
+            portMAX_DELAY
+        );
+
+        bool running = true;
+
+        rtp_receiver_data_t data = {
+            .running = &running,
+            .server = server,
+        };
+        xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, &data, 5, &rtp_hndl);
+
+        xEventGroupWaitBits(
+            g_event_mgr.signals,
+            SIG_STOP_RTP,
+            pdTRUE,
+            pdTRUE,
+            portMAX_DELAY
+        );
+
+        running = false;
+        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelete(rtp_hndl);
+    }
 }

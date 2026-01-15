@@ -23,4 +23,6 @@ void rtp_server_destroy(rtp_server_t *rtp_ser);
 
 void rtp_receiver_task(void *args);
 
+void rtp_server_mgr_task(void *arg);
+
 #endif /* RTP_SERVER_H */

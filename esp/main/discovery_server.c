@@ -1,6 +1,7 @@
 #include "discovery_server.h"
 
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "freertos/semphr.h"
 #include "esp_log.h"
@@ -44,6 +45,7 @@ static void init_device_info(void) {
 }
 
 static void discovery_server_task(void *arg) {
+    bool *running = (bool *)arg;
     int sockfd;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
@@ -83,13 +85,7 @@ static void discovery_server_task(void *arg) {
     
     ESP_LOGI(TAG, "Discovery server started on port %d", DISCOVERY_PORT);
     
-    while (1) {
-        EventBits_t bits = xEventGroupGetBits(g_system_events);
-        if (bits & EVENT_CLIENT_CONNECTED) {
-            ESP_LOGI(TAG, "Client connected, stopping discovery");
-            break;
-        }
-
+    while (*running) {
         recv_len = recvfrom(sockfd, buffer, sizeof(buffer) - 1, 0,
                             (struct sockaddr *)&client_addr, &client_len);
         
@@ -116,6 +112,7 @@ static void discovery_server_task(void *arg) {
 }
 
 static void handshake_server_task(void *arg) {
+    bool *running = (bool *)arg;
     int sockfd;
     char buffer[128];
     int recv_len;
@@ -144,12 +141,7 @@ static void handshake_server_task(void *arg) {
 
     ESP_LOGI(TAG, "Handshake task started");
 
-    while (1) {
-        EventBits_t bits = xEventGroupGetBits(g_system_events);
-        if (bits & EVENT_CLIENT_CONNECTED) {
-            break;
-        }
-
+    while (*running) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
 
@@ -170,11 +162,11 @@ static void handshake_server_task(void *arg) {
                     ESP_LOGE(TAG, "HANDSHAKE_RESPONSE send failed");
                 }
 
-                if (xSemaphoreTake(g_conn_cfg.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-                    xEventGroupSetBits(g_system_events, EVENT_CLIENT_CONNECTED);
-                    memcpy(&g_conn_cfg.host_ip, &client_addr.sin_addr, sizeof(struct in_addr));
+                if (xSemaphoreTake(g_event_mgr.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                    xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_CONNECTED);
+                    memcpy(&g_event_mgr.host_ip, &client_addr.sin_addr, sizeof(struct in_addr));
                     ESP_LOGI(TAG, "Connection accepted from %s", client_ip);
-                    xSemaphoreGive(g_conn_cfg.mutex);
+                    xSemaphoreGive(g_event_mgr.mutex);
                 } else {
                     ESP_LOGW(TAG, "Failed to lock g_conn_cfg mutex");
                 }
@@ -190,32 +182,33 @@ static void handshake_server_task(void *arg) {
 }
 
 void discovery_server_mgr_task(void *arg) {
-    EventBits_t bits;
     TaskHandle_t handshake_hndl = NULL;
     TaskHandle_t discovery_hndl = NULL;
 
     while (1) {
-        bits = xEventGroupWaitBits(
-            g_system_events,
-            EVENT_WIFI_CONNECTED | EVENT_DISCOVERY_START,
-            pdFALSE,
+        xEventGroupWaitBits(
+            g_event_mgr.signals,
+            SIG_START_DISCOVERY,
+            pdTRUE,
             pdTRUE,
             portMAX_DELAY
         );
 
-        xEventGroupClearBits(g_system_events, EVENT_DISCOVERY_START);
+        bool running = true;
 
-        xTaskCreate(handshake_server_task, "handshake_server_task", 4096, NULL, 5, &handshake_hndl);
-        xTaskCreate(discovery_server_task, "discovery_server_task", 4096, NULL, 5, &discovery_hndl);
+        xTaskCreate(handshake_server_task, "handshake_server_task", 4096, &running, 5, &handshake_hndl);
+        xTaskCreate(discovery_server_task, "discovery_server_task", 4096, &running, 5, &discovery_hndl);
 
-        bits = xEventGroupWaitBits(
-            g_system_events,
-            EVENT_CLIENT_CONNECTED,
-            pdFALSE,
+        xEventGroupWaitBits(
+            g_event_mgr.signals,
+            SIG_STOP_DISCOVERY,
+            pdTRUE,
             pdTRUE,
             portMAX_DELAY
         );
 
+        running = false;
+        vTaskDelay(pdMS_TO_TICKS(100));
         vTaskDelete(handshake_hndl);
         vTaskDelete(discovery_hndl);
     }

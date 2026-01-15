@@ -6,7 +6,14 @@
 #include "driver/i2s_std.h"
 #include "esp_log.h"
 
+#include "event_mgr.h"
+
 static const char *TAG = "WHP " __FILE__;
+
+typedef struct {
+    audio_t *audio;
+    bool *running;
+} audio_data_t;
 
 static int init_ringbuf(RingbufHandle_t *rb) {
     if (rb == NULL) {
@@ -23,14 +30,14 @@ static int init_ringbuf(RingbufHandle_t *rb) {
     return 0;
 }
 
-// static void clear_ringbuf(const RingbufHandle_t rb) {
-//     size_t item_size;
-//     char *item;
-//
-//     while ((item = (char *)xRingbufferReceive(rb, &item_size, 0))) {
-//         vRingbufferReturnItem(rb, item);
-//     }
-// }
+static void clear_ringbuf(const RingbufHandle_t rb) {
+    size_t item_size;
+    char *item;
+
+    while ((item = (char *)xRingbufferReceive(rb, &item_size, 0))) {
+        vRingbufferReturnItem(rb, item);
+    }
+}
 
 static void i2s_init_std_simplex(i2s_chan_handle_t *tx_chan) {
     i2s_chan_config_t tx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
@@ -70,12 +77,17 @@ int audio_init(audio_t *audio) {
     return 0;
 }
 
-void audio_play(void *arg) {
-    audio_t *ctx = (audio_t *)arg;
+void audio_play_task(void *arg) {
+    audio_data_t *data = (audio_data_t *)arg;
+    audio_t *ctx = data->audio;
+    bool *running = data->running;
+
     size_t item_size;
     uint8_t* item;
 
-    while (1) {
+    ESP_LOGI(TAG, "audio_play_task started");
+
+    while (*running) {
         item = (uint8_t*)xRingbufferReceive(ctx->rb, &item_size, pdMS_TO_TICKS(100));
 
         if (item != NULL) {
@@ -84,5 +96,43 @@ void audio_play(void *arg) {
             vRingbufferReturnItem(ctx->rb, item);
         }
     }
+
+    vTaskDelete(NULL);
+    ESP_LOGI(TAG, "audio_play_task stopped");
 }
 
+void audio_play_mgr(void *arg) {
+    audio_t *audio = (audio_t *)arg;
+    TaskHandle_t audio_hndl = NULL;
+
+    while (1) {
+        xEventGroupWaitBits(
+            g_event_mgr.signals,
+            SIG_START_AUDIO,
+            pdTRUE,
+            pdTRUE,
+            portMAX_DELAY
+        );
+
+        bool running = true;
+
+        audio_data_t data = {
+            .running = &running,
+            .audio = audio,
+        };
+        xTaskCreate(audio_play_task, "audio_play_task", 4096, &data, 5, &audio_hndl);
+
+        xEventGroupWaitBits(
+            g_event_mgr.signals,
+            SIG_STOP_AUDIO,
+            pdTRUE,
+            pdTRUE,
+            portMAX_DELAY
+        );
+
+        running = false;
+        vTaskDelay(pdMS_TO_TICKS(100));
+        vTaskDelete(audio_hndl);
+        clear_ringbuf(audio->rb);
+    }
+}

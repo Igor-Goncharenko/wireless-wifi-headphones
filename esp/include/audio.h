@@ -37,6 +37,8 @@ typedef struct {
 
 int audio_init(audio_t *audio);
 
-void audio_play(void *arg);
+void audio_play_task(void *arg);
+
+void audio_play_mgr(void *arg);
 
 #endif /* AUDIO_H */

@@ -56,7 +56,7 @@ static void init_device_info(void) {
 static int discovery_server_init(void) {
     struct sockaddr_in server_addr;
 
-    if ((s_discovery_sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    if ((s_discovery_sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
         ESP_LOGE(TAG, "Failed to create socket: %s", strerror(errno));
         s_discovery_sockfd = -1;
         return -1;
@@ -128,7 +128,7 @@ static void discovery_server_task(void *arg) {
                     ESP_LOGE(TAG, "Failed to send response");
                 }
             }
-        } else if (recv_len < 0 && errno != EAGAIN) {   // ignore timeout
+        } else if (recv_len < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {   // ignore timeout
             ESP_LOGE(TAG, "recvfrom failed: errno=%d, strerror=\"%s\"", errno, strerror(errno));
         }
     }
@@ -139,7 +139,7 @@ static void discovery_server_task(void *arg) {
 }
 
 static int handshake_server_init(void) {
-    if ((s_handshake_sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    if ((s_handshake_sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
         ESP_LOGE(TAG, "Failed to create socket: %s", strerror(errno));
         return -1;
     }
@@ -193,9 +193,6 @@ static void handshake_server_task(void *arg) {
         recv_len = recvfrom(s_handshake_sockfd, buffer, sizeof(buffer), 0,
                             (struct sockaddr *)&client_addr, &client_len);
 
-        char client_ip[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
-
         if (recv_len > 0) {
             buffer[recv_len] = '\0';
             ESP_LOGI(TAG, "received handshake request: \"%s\"", buffer);
@@ -210,15 +207,15 @@ static void handshake_server_task(void *arg) {
 
                 if (xSemaphoreTake(g_event_mgr.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                     xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_CONNECTED);
-                    char* ip_addr_str = inet_ntoa(client_addr.sin_addr);
-                    strncpy(g_event_mgr.host_ip4, ip_addr_str, IP4ADDR_STRLEN_MAX);
-                    ESP_LOGI(TAG, "Connection accepted from %s", client_ip);
+                    inet_ntop(AF_INET, &client_addr.sin_addr, g_event_mgr.host_ip4,
+                              sizeof(g_event_mgr.host_ip4));
+                    ESP_LOGI(TAG, "Connection accepted from %s", g_event_mgr.host_ip4);
                     xSemaphoreGive(g_event_mgr.mutex);
                 } else {
                     ESP_LOGW(TAG, "Failed to lock g_conn_cfg mutex");
                 }
             }
-        } else if (recv_len < 0 && errno != EAGAIN) {   // ignore timeout
+        } else if (recv_len < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {   // ignore timeout
             ESP_LOGE(TAG, "recvfrom failed: errno=%d, strerror=\"%s\"", errno, strerror(errno));
         }
     }

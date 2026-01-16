@@ -9,6 +9,7 @@
 typedef struct {
     int sockfd;
     struct sockaddr_in addr;
+    struct in_addr allowed_ip4;
     
     uint16_t expected_sequence;
     uint32_t packets_received;

@@ -24,7 +24,7 @@ static rtp_server_t s_server = { 0 };
 static int rtp_server_init(void) {
     memset(&s_server, 0, sizeof(rtp_server_t));
 
-    if ((s_server.sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    if ((s_server.sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
         ESP_LOGE(TAG, "RTP server failed to create socket");
         return -1;
     }
@@ -36,9 +36,8 @@ static int rtp_server_init(void) {
 
     memset(&s_server.addr, 0, sizeof(s_server.addr));
     s_server.addr.sin_family = AF_INET;
-    s_server.addr.sin_addr.s_addr = inet_addr(g_event_mgr.host_ip4);
+    s_server.addr.sin_addr.s_addr = htonl(INADDR_ANY);
     s_server.addr.sin_port = htons(RTP_PORT);
-
     if (bind(s_server.sockfd, (struct sockaddr *)&s_server.addr, sizeof(s_server.addr)) < 0) {
         ESP_LOGE(TAG, "RTP server bind failed");
         close(s_server.sockfd);
@@ -59,6 +58,8 @@ static int rtp_server_init(void) {
     s_server.packets_lost = 0;
 
     s_server.rb = get_rb_ptr();
+
+    s_server.allowed_ip4.s_addr = ipaddr_addr(g_event_mgr.host_ip4);
 
     ESP_LOGI(TAG, "RTP server initialized: sockfd=%d, port=%d", s_server.sockfd, RTP_PORT);
     return 0;
@@ -86,7 +87,7 @@ static void rtp_receiver_task(void *arg) {
                             (struct sockaddr *)&client_addr, &client_len);
         
         if (recv_len < 0) {
-            if (errno == EAGAIN) continue;  // ignore timeout
+            if (errno == EAGAIN || errno == EWOULDBLOCK) continue;  // ignore timeout
             ESP_LOGE(TAG, "recvfrom failed: %s", strerror(errno));
 
             int error = 0;
@@ -96,6 +97,12 @@ static void rtp_receiver_task(void *arg) {
             }
             
             vTaskDelay(pdMS_TO_TICKS(1000));
+            continue;
+        }
+
+        if (client_addr.sin_addr.s_addr != s_server.allowed_ip4.s_addr) {
+            ESP_LOGW(TAG, "Rejected packet from: %s:%d, size: %d", inet_ntoa(client_addr.sin_addr),
+                     ntohs(client_addr.sin_port), recv_len);
             continue;
         }
 

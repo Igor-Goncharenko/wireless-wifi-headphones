@@ -13,50 +13,46 @@
 #include "protocols/rtp.h"
 
 static const char *TAG = "WHP " __FILE__;
+static volatile bool s_running = false;
+static TaskHandle_t s_rtp_hndl = NULL;
+static rtp_server_t s_server = { 0 };
 
-#define PACKET_BUFFER_SIZE (CONFIG_RTP_PACKET_SIZE + sizeof(rtp_header_t) + 1)
+static int rtp_server_init(RingbufHandle_t *rb) {
+    memset(&s_server, 0, sizeof(rtp_server_t));
 
-typedef struct {
-    rtp_server_t *server;
-    bool *running;
-} rtp_receiver_data_t;
-
-int rtp_server_init(rtp_server_t *rtp_ser, const RingbufHandle_t rb) {
-    memset(rtp_ser, 0, sizeof(rtp_server_t));
-
-    if ((rtp_ser->sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    if ((s_server.sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         ESP_LOGE(TAG, "RTP server failed to create socket");
         return -1;
     }
 
     int enable = 1;
-    if (setsockopt(rtp_ser->sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) < 0) {
+    if (setsockopt(s_server.sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) < 0) {
         ESP_LOGW(TAG, "setsockopt SO_REUSEADDR failed");
     }
 
-    memset(&rtp_ser->server_addr, 0, sizeof(rtp_ser->server_addr));
-    rtp_ser->server_addr.sin_family = AF_INET;
-    rtp_ser->server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
-    rtp_ser->server_addr.sin_port = htons(RTP_PORT);
+    memset(&s_server.addr, 0, sizeof(s_server.addr));
+    s_server.addr.sin_family = AF_INET;
+    s_server.addr.sin_addr.s_addr = inet_addr(g_event_mgr.host_ip4);
+    s_server.addr.sin_port = htons(RTP_PORT);
 
-    if (bind(rtp_ser->sockfd, (struct sockaddr *)&rtp_ser->server_addr, sizeof(rtp_ser->server_addr)) < 0) {
+    if (bind(s_server.sockfd, (struct sockaddr *)&s_server.addr, sizeof(s_server.addr)) < 0) {
         ESP_LOGE(TAG, "RTP server bind failed");
-        close(rtp_ser->sockfd);
-        rtp_ser->sockfd = -1;
+        close(s_server.sockfd);
+        s_server.sockfd = -1;
         return -1;
     }
 
-    rtp_ser->expected_sequence = 0;
-    rtp_ser->packets_received = 0;
-    rtp_ser->packets_lost = 0;
+    s_server.expected_sequence = 0;
+    s_server.packets_received = 0;
+    s_server.packets_lost = 0;
 
-    rtp_ser->rb = rb;
+    s_server.rb = rb;
 
-    ESP_LOGI(TAG, "RTP server initialized: sockfd=%d, port=%d", rtp_ser->sockfd, RTP_PORT);
+    ESP_LOGI(TAG, "RTP server initialized: sockfd=%d, port=%d", s_server.sockfd, RTP_PORT);
     return 0;
 }
 
-void rtp_server_destroy(rtp_server_t *rtp_ser) {
+static void rtp_server_destroy(rtp_server_t *rtp_ser) {
     if (rtp_ser->sockfd > 0) {
         close(rtp_ser->sockfd);
     }
@@ -65,17 +61,7 @@ void rtp_server_destroy(rtp_server_t *rtp_ser) {
     ESP_LOGI(TAG, "RTP server destroyed");
 }
 
-void rtp_receiver_task(void *arg) {
-    rtp_receiver_data_t *data = (rtp_receiver_data_t *)arg;
-    rtp_server_t *server = data->server;
-    bool *running = data->running;
-
-    if (server == NULL || server->sockfd < 0 || server->rb == NULL) {
-        ESP_LOGE(TAG, "Invalid server state");
-        vTaskDelete(NULL);
-        return;
-    }
-
+static void rtp_receiver_task(void *arg) {
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
     uint8_t buffer[PACKET_SIZE];
@@ -83,18 +69,18 @@ void rtp_receiver_task(void *arg) {
 
     ESP_LOGI(TAG, "RTP server started on port %d", RTP_PORT);
     
-    while (*running) {
-        recv_len = recvfrom(server->sockfd, buffer, sizeof(buffer), 0,
+    while (s_running) {
+        recv_len = recvfrom(s_server.sockfd, buffer, sizeof(buffer), 0,
                             (struct sockaddr *)&client_addr, &client_len);
         
         if (recv_len < 0) {
             int err = errno;
             ESP_LOGE(TAG, "recvfrom failed: error %d (%s), sockfd=%d", 
-                     err, strerror(err), server->sockfd);
+                     err, strerror(err), s_server.sockfd);
 
             int error = 0;
             socklen_t len = sizeof(error);
-            if (getsockopt(server->sockfd, SOL_SOCKET, SO_ERROR, &error, &len) == 0) {
+            if (getsockopt(s_server.sockfd, SOL_SOCKET, SO_ERROR, &error, &len) == 0) {
                 ESP_LOGE(TAG, "Socket error: %d (%s)", error, strerror(error));
             }
             
@@ -117,22 +103,22 @@ void rtp_receiver_task(void *arg) {
             const uint16_t sequence = ntohs(header->sequence);
             
             // check packet loss
-            if (server->expected_sequence != 0 && sequence != server->expected_sequence) {
-                server->packets_lost += (sequence - server->expected_sequence);
+            if (s_server.expected_sequence != 0 && sequence != s_server.expected_sequence) {
+                s_server.packets_lost += (sequence - s_server.expected_sequence);
             }
-            server->expected_sequence = sequence + 1;
-            server->packets_received++;
+            s_server.expected_sequence = sequence + 1;
+            s_server.packets_received++;
             
             const uint8_t *audio_data = buffer + sizeof(rtp_header_t);
             const size_t audio_data_size = recv_len - sizeof(rtp_header_t);
-            UBaseType_t res = xRingbufferSend(server->rb, audio_data, audio_data_size,
+            UBaseType_t res = xRingbufferSend(s_server.rb, audio_data, audio_data_size,
                                               pdMS_TO_TICKS(100));
             if (res != pdTRUE) {
                 ESP_LOGW(TAG, "Ring buffer full, dropped %d bytes", audio_data_size);
             }
-            if (server->packets_received % 100 == 0) {
+            if (s_server.packets_received % 100 == 0) {
                 ESP_LOGI(TAG, "Received %lu packets, lost: %lu", 
-                         server->packets_received, server->packets_lost);
+                         s_server.packets_received, s_server.packets_lost);
             }
         }
         
@@ -144,8 +130,7 @@ void rtp_receiver_task(void *arg) {
 }
 
 void rtp_server_mgr_task(void *arg) {
-    rtp_server_t *server = (rtp_server_t*)arg;
-    TaskHandle_t rtp_hndl = NULL;
+    RingbufHandle_t *rb = (RingbufHandle_t *)arg;
 
     while (1) {
         xEventGroupWaitBits(
@@ -156,13 +141,14 @@ void rtp_server_mgr_task(void *arg) {
             portMAX_DELAY
         );
 
-        bool running = true;
+        if (rtp_server_init(rb) != 0) {
+            ESP_LOGE(TAG, "Failed to init rtp server");
+            xEventGroupSetBits(g_event_mgr.events, EV_RTP_INIT_FAILED);
+            continue;
+        }
 
-        rtp_receiver_data_t data = {
-            .running = &running,
-            .server = server,
-        };
-        xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, &data, 5, &rtp_hndl);
+        s_running = true;
+        xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, NULL, 5, &s_rtp_hndl);
 
         xEventGroupWaitBits(
             g_event_mgr.signals,
@@ -172,8 +158,9 @@ void rtp_server_mgr_task(void *arg) {
             portMAX_DELAY
         );
 
-        running = false;
-        vTaskDelay(pdMS_TO_TICKS(100));
-        vTaskDelete(rtp_hndl);
+        s_running = false;
+        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelete(s_rtp_hndl);
+        rtp_server_destroy(&s_server);
     }
 }

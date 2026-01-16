@@ -14,7 +14,6 @@ static const char *TAG = "WHP " __FILE__;
 void app_main(void) {
     esp_err_t ret;
     audio_t audio = { 0 };
-    rtp_server_t rtp = { 0 };
 
     ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -33,11 +32,6 @@ void app_main(void) {
         return;
     }
 
-    if (rtp_server_init(&rtp, audio.rb) != 0) {
-        ESP_LOGE(TAG, "Failed to init rtp server, aborting");
-        return;
-    }
-
     if (init_event_mgr(&g_event_mgr) != 0) {
         ESP_LOGE(TAG, "Failed to init event manager, aborting");
         destroy_event_mgr(&g_event_mgr);
@@ -46,7 +40,7 @@ void app_main(void) {
 
     xTaskCreate(event_mgr_task, "event_mgr_task", 4096, NULL, 5, NULL);
     xTaskCreate(discovery_server_mgr_task, "discovery_server_mgr_task", 4096, NULL, 5, NULL);
-    xTaskCreate(rtp_server_mgr_task, "rtp_server_mgr_task", 4096, &rtp, 5, NULL);
+    xTaskCreate(rtp_server_mgr_task, "rtp_server_mgr_task", 4096, &audio.rb, 5, NULL);
     xTaskCreate(audio_play_mgr, "audio_play_mgr", 4096, &audio, 5, NULL);
 
     while (1) {

@@ -162,7 +162,8 @@ static void handshake_server_task(void *arg) {
 
                 if (xSemaphoreTake(g_event_mgr.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
                     xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_CONNECTED);
-                    memcpy(&g_event_mgr.host_ip, &client_addr.sin_addr, sizeof(struct in_addr));
+                    char* ip_addr_str = inet_ntoa(client_addr.sin_addr);
+                    strncpy(g_event_mgr.host_ip4, ip_addr_str, IP4ADDR_STRLEN_MAX);
                     ESP_LOGI(TAG, "Connection accepted from %s", client_ip);
                     xSemaphoreGive(g_event_mgr.mutex);
                 } else {

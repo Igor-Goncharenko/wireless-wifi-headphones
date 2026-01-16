@@ -12,6 +12,7 @@ typedef enum {
     ST_CLIENT_CONNECTED = BIT2,
 
     ST_WIFI_CONNECTED = BIT3,
+    ST_FAILED = BIT10,
 } system_states_e;
 
 typedef enum {
@@ -25,6 +26,7 @@ typedef enum {
     EV_CLIENT_LOST_CONNECTION = BIT4,
     // other
     EV_WIFI_DISCONNECTED = BIT5,
+    EV_RTP_INIT_FAILED = BIT6,
 } system_events_e;
 
 typedef enum {
@@ -40,7 +42,7 @@ typedef enum {
 typedef struct {
     SemaphoreHandle_t mutex;
 
-    struct in_addr host_ip;
+    char host_ip4[IP4ADDR_STRLEN_MAX];
 
     system_states_e curr_state;
 

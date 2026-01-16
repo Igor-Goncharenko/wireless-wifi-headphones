@@ -8,20 +8,14 @@
 
 typedef struct {
     int sockfd;
-    struct sockaddr_in server_addr;
+    struct sockaddr_in addr;
     
     uint16_t expected_sequence;
     uint32_t packets_received;
     uint32_t packets_lost;
 
-    RingbufHandle_t rb;
+    RingbufHandle_t *rb;
 } rtp_server_t;
-
-int rtp_server_init(rtp_server_t *rtp_ser, const RingbufHandle_t rb);
-
-void rtp_server_destroy(rtp_server_t *rtp_ser);
-
-void rtp_receiver_task(void *args);
 
 void rtp_server_mgr_task(void *arg);
 

@@ -42,7 +42,7 @@ void destroy_event_mgr(event_mgr_t *mgr) {
     ESP_LOGI(TAG, "event_mgr_t destroyed");
 }
 
-void handle_state_machine(event_mgr_t *mgr, EventBits_t events, EventBits_t states) {
+static void handle_state_machine(event_mgr_t *mgr, EventBits_t events, EventBits_t states) {
     if (xSemaphoreTake(mgr->mutex, pdMS_TO_TICKS(50)) == pdFALSE) {
         ESP_LOGE(TAG, "Failed to take mgr mutex");
         return;

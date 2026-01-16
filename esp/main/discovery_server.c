@@ -6,13 +6,11 @@
 #include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_mac.h"
-#include "esp_netif_ip_addr.h"
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "sdkconfig.h"
 #include <stdio.h>
 #include <stdbool.h>
-#include <time.h>
 
 #include "config.h"
 #include "wifi.h"
@@ -38,7 +36,7 @@ static void init_device_info(void) {
              "%02X:%02X:%02X:%02X:%02X:%02X",
              mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
 
-    strncpy(g_device_info.ipv4, g_ip4_str, sizeof(g_device_info.ipv4) - 1);
+    strncpy(g_device_info.ipv4, wifi_get_ip4_str(), sizeof(g_device_info.ipv4) - 1);
 
     ESP_LOGI(TAG, "Device: name = \"%s\"; mac=\"%s\"; ipv4=\"%s\";", g_device_info.name,
              g_device_info.mac, g_device_info.ipv4);

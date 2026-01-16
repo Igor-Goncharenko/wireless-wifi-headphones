@@ -27,7 +27,6 @@ void app_main(void) {
     xTaskCreate(discovery_server_mgr_task, "discovery_server", 4096, NULL, 5, NULL);
 
     wifi_init_sta();
-    vTaskDelay(pdMS_TO_TICKS(500));
 
     if (audio_init(&audio) != 0) {
         ESP_LOGE(TAG, "Failed to init audio, aborting");
@@ -38,7 +37,6 @@ void app_main(void) {
         ESP_LOGE(TAG, "Failed to init rtp server, aborting");
         return;
     }
-    vTaskDelay(pdMS_TO_TICKS(500));
 
     if (init_event_mgr(&g_event_mgr) != 0) {
         ESP_LOGE(TAG, "Failed to init event manager, aborting");

@@ -1,8 +1,8 @@
 #ifndef WIFI_H
 #define WIFI_H
 
-extern char g_ip4_str[16];
+void wifi_init_sta(void);
 
-int wifi_init_sta(void);
+const char* wifi_get_ip4_str(void);
 
 #endif /* WIFI_H */

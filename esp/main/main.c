@@ -22,21 +22,15 @@ void app_main(void) {
     }
     ESP_ERROR_CHECK(ret);
 
-    xTaskCreate(event_mgr_task, "event_mgr_task", 4096, NULL, 5, NULL);
-    xTaskCreate(discovery_server_mgr_task, "discovery_server", 4096, NULL, 5, NULL);
-
-    wifi_init_sta();
-
+    if (init_event_mgr() != 0) {
+        ESP_LOGE(TAG, "Failed to init g_event_mgr");
+        return;
+    }
     if (audio_init(&audio) != 0) {
         ESP_LOGE(TAG, "Failed to init audio, aborting");
         return;
     }
-
-    if (init_event_mgr(&g_event_mgr) != 0) {
-        ESP_LOGE(TAG, "Failed to init event manager, aborting");
-        destroy_event_mgr(&g_event_mgr);
-        return;
-    }
+    wifi_init_sta();
 
     xTaskCreate(event_mgr_task, "event_mgr_task", 4096, NULL, 5, NULL);
     xTaskCreate(discovery_server_mgr_task, "discovery_server_mgr_task", 4096, NULL, 5, NULL);

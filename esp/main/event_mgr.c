@@ -9,37 +9,37 @@ static const char *TAG = "WHP" __FILE__;
 
 event_mgr_t g_event_mgr;
 
-int init_event_mgr(event_mgr_t *mgr) {
-    memset(mgr, 0, sizeof(event_mgr_t));
+int init_event_mgr(void) {
+    memset(&g_event_mgr, 0, sizeof(event_mgr_t));
 
-    if ((mgr->mutex = xSemaphoreCreateMutex()) == NULL) {
+    if ((g_event_mgr.mutex = xSemaphoreCreateMutex()) == NULL) {
         ESP_LOGE(TAG, "Failed to init mutex");
         return -1;
     }
 
-    mgr->states = xEventGroupCreate();
-    mgr->events = xEventGroupCreate();
-    mgr->signals = xEventGroupCreate();
+    g_event_mgr.states = xEventGroupCreate();
+    g_event_mgr.events = xEventGroupCreate();
+    g_event_mgr.signals = xEventGroupCreate();
 
-    if (mgr->states == NULL || mgr->events == NULL || mgr->signals == NULL) {
+    if (g_event_mgr.states == NULL || g_event_mgr.events == NULL || g_event_mgr.signals == NULL) {
         ESP_LOGE(TAG, "Failed to init event groups");
         return -1;
     }
 
-    mgr->curr_state = ST_INITIALIZED;
-    xEventGroupSetBits(mgr->states, ST_INITIALIZED);
-
+    g_event_mgr.curr_state = ST_INITIALIZED;
+    xEventGroupSetBits(g_event_mgr.states, ST_INITIALIZED);
+    ESP_LOGI(TAG, "g_event_mgr initialized");
     return 0;
 }
 
-void destroy_event_mgr(event_mgr_t *mgr) {
-    if (mgr->mutex) vSemaphoreDelete(mgr->mutex);
-    if (mgr->states) vEventGroupDelete(mgr->states);
-    if (mgr->events) vEventGroupDelete(mgr->events);
-    if (mgr->signals) vEventGroupDelete(mgr->signals);
+void destroy_event_mgr(void) {
+    if (g_event_mgr.mutex) vSemaphoreDelete(g_event_mgr.mutex);
+    if (g_event_mgr.states) vEventGroupDelete(g_event_mgr.states);
+    if (g_event_mgr.events) vEventGroupDelete(g_event_mgr.events);
+    if (g_event_mgr.signals) vEventGroupDelete(g_event_mgr.signals);
 
-    memset(mgr, 0, sizeof(event_mgr_t));
-    ESP_LOGI(TAG, "event_mgr_t destroyed");
+    memset(&g_event_mgr, 0, sizeof(event_mgr_t));
+    ESP_LOGI(TAG, "g_event_mgr destroyed");
 }
 
 static void handle_state_machine(event_mgr_t *mgr, EventBits_t events, EventBits_t states) {
@@ -111,11 +111,6 @@ static void handle_state_machine(event_mgr_t *mgr, EventBits_t events, EventBits
 }
 
 void event_mgr_task(void *arg) {
-    if (init_event_mgr(&g_event_mgr) != 0) {
-        ESP_LOGE(TAG, "Failed to init connection manager");
-        return;
-    }
-
     EventBits_t current_states, new_events;
 
     while (1) {
@@ -131,5 +126,5 @@ void event_mgr_task(void *arg) {
         handle_state_machine(&g_event_mgr, new_events, current_states);
     }
 
-    destroy_event_mgr(&g_event_mgr);
+    destroy_event_mgr();
 }

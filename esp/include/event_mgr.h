@@ -53,10 +53,10 @@ typedef struct {
 
 extern event_mgr_t g_event_mgr;
 
+int init_event_mgr(void);
+
+void destroy_event_mgr(void);
+
 void event_mgr_task(void *arg);
-
-int init_event_mgr(event_mgr_t *mgr);
-
-void destroy_event_mgr(event_mgr_t *mgr);
 
 #endif /* EVENT_MGR_H */

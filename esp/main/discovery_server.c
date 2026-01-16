@@ -18,6 +18,9 @@
 #include "event_mgr.h"
 
 static const char *TAG = "WHP " __FILE__;
+static TaskHandle_t s_handshake_hndl = NULL;
+static TaskHandle_t s_discovery_hndl = NULL;
+static volatile bool s_running = false;
 
 headphones_info_t g_device_info = {
     .name = CONFIG_HEADPHONES_NAME,
@@ -43,7 +46,6 @@ static void init_device_info(void) {
 }
 
 static void discovery_server_task(void *arg) {
-    bool *running = (bool *)arg;
     int sockfd;
     struct sockaddr_in server_addr, client_addr;
     socklen_t client_len = sizeof(client_addr);
@@ -83,7 +85,7 @@ static void discovery_server_task(void *arg) {
     
     ESP_LOGI(TAG, "Discovery server started on port %d", DISCOVERY_PORT);
     
-    while (*running) {
+    while (s_running) {
         recv_len = recvfrom(sockfd, buffer, sizeof(buffer) - 1, 0,
                             (struct sockaddr *)&client_addr, &client_len);
         
@@ -110,7 +112,6 @@ static void discovery_server_task(void *arg) {
 }
 
 static void handshake_server_task(void *arg) {
-    bool *running = (bool *)arg;
     int sockfd;
     char buffer[128];
     int recv_len;
@@ -139,7 +140,7 @@ static void handshake_server_task(void *arg) {
 
     ESP_LOGI(TAG, "Handshake task started");
 
-    while (*running) {
+    while (s_running) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
 
@@ -181,9 +182,6 @@ static void handshake_server_task(void *arg) {
 }
 
 void discovery_server_mgr_task(void *arg) {
-    TaskHandle_t handshake_hndl = NULL;
-    TaskHandle_t discovery_hndl = NULL;
-
     while (1) {
         xEventGroupWaitBits(
             g_event_mgr.signals,
@@ -193,10 +191,9 @@ void discovery_server_mgr_task(void *arg) {
             portMAX_DELAY
         );
 
-        bool running = true;
-
-        xTaskCreate(handshake_server_task, "handshake_server_task", 4096, &running, 5, &handshake_hndl);
-        xTaskCreate(discovery_server_task, "discovery_server_task", 4096, &running, 5, &discovery_hndl);
+        s_running = true;
+        xTaskCreate(handshake_server_task, "handshake_server_task", 4096, NULL, 5, &s_handshake_hndl);
+        xTaskCreate(discovery_server_task, "discovery_server_task", 4096, NULL, 5, &s_discovery_hndl);
 
         xEventGroupWaitBits(
             g_event_mgr.signals,
@@ -206,9 +203,9 @@ void discovery_server_mgr_task(void *arg) {
             portMAX_DELAY
         );
 
-        running = false;
-        vTaskDelay(pdMS_TO_TICKS(100));
-        vTaskDelete(handshake_hndl);
-        vTaskDelete(discovery_hndl);
+        s_running = false;
+        vTaskDelay(pdMS_TO_TICKS(500));
+        vTaskDelete(s_handshake_hndl);
+        vTaskDelete(s_discovery_hndl);
     }
 }

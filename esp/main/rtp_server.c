@@ -13,9 +13,12 @@
 #include "protocols/rtp.h"
 
 static const char *TAG = "WHP " __FILE__;
-static volatile bool s_running = false;
+static bool s_running = false;
 static TaskHandle_t s_rtp_hndl = NULL;
 static rtp_server_t s_server = { 0 };
+
+#define RTP_SOCK_TIMEOUT_MS 1000
+#define DELAY_BEFORE_FORCE_TASK_DEL_MS (RTP_SOCK_TIMEOUT_MS + 200)
 
 static int rtp_server_init(RingbufHandle_t *rb) {
     memset(&s_server, 0, sizeof(rtp_server_t));
@@ -42,6 +45,14 @@ static int rtp_server_init(RingbufHandle_t *rb) {
         return -1;
     }
 
+    struct timeval tv = {
+        .tv_sec = RTP_SOCK_TIMEOUT_MS / 1000,
+        .tv_usec = RTP_SOCK_TIMEOUT_MS % 1000,
+    };
+    if (setsockopt(s_server.sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        ESP_LOGW(TAG, "setsockopt SO_RCVTIMEO failed: %s", strerror(errno));
+    }
+
     s_server.expected_sequence = 0;
     s_server.packets_received = 0;
     s_server.packets_lost = 0;
@@ -52,12 +63,12 @@ static int rtp_server_init(RingbufHandle_t *rb) {
     return 0;
 }
 
-static void rtp_server_destroy(rtp_server_t *rtp_ser) {
-    if (rtp_ser->sockfd > 0) {
-        close(rtp_ser->sockfd);
+static void rtp_server_destroy() {
+    if (s_server.sockfd > 0) {
+        close(s_server.sockfd);
     }
 
-    memset(rtp_ser, 0, sizeof(rtp_server_t));
+    memset(&s_server, 0, sizeof(rtp_server_t));
     ESP_LOGI(TAG, "RTP server destroyed");
 }
 
@@ -74,9 +85,8 @@ static void rtp_receiver_task(void *arg) {
                             (struct sockaddr *)&client_addr, &client_len);
         
         if (recv_len < 0) {
-            int err = errno;
-            ESP_LOGE(TAG, "recvfrom failed: error %d (%s), sockfd=%d", 
-                     err, strerror(err), s_server.sockfd);
+            if (errno == EAGAIN) continue;  // ignore timeout
+            ESP_LOGE(TAG, "recvfrom failed: %s", strerror(errno));
 
             int error = 0;
             socklen_t len = sizeof(error);
@@ -126,6 +136,7 @@ static void rtp_receiver_task(void *arg) {
     }
     
     ESP_LOGI(TAG, "RTP server stopped");
+    s_rtp_hndl = NULL;
     vTaskDelete(NULL);
 }
 
@@ -159,8 +170,12 @@ void rtp_server_mgr_task(void *arg) {
         );
 
         s_running = false;
-        vTaskDelay(pdMS_TO_TICKS(500));
-        vTaskDelete(s_rtp_hndl);
-        rtp_server_destroy(&s_server);
+        vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
+        if (s_rtp_hndl != NULL) {
+            vTaskDelete(s_rtp_hndl);
+            s_rtp_hndl = NULL;
+            ESP_LOGW(TAG, "RTP task did not stop properly, forcing stop");
+        }
+        rtp_server_destroy();
     }
 }

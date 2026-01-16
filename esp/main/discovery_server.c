@@ -9,18 +9,26 @@
 #include "lwip/inet.h"
 #include "lwip/sockets.h"
 #include "sdkconfig.h"
+#include <errno.h>
 #include <stdio.h>
 #include <stdbool.h>
+#include <time.h>
 
 #include "config.h"
 #include "wifi.h"
 #include "protocols/discovery.h"
 #include "event_mgr.h"
 
+#define DISCOVERY_SOCK_TIMEOUT_MS 1000
+#define DELAY_BEFORE_FORCE_TASK_DEL_MS (DISCOVERY_SOCK_TIMEOUT_MS + 200)
+
 static const char *TAG = "WHP " __FILE__;
 static TaskHandle_t s_handshake_hndl = NULL;
 static TaskHandle_t s_discovery_hndl = NULL;
-static volatile bool s_running = false;
+static bool s_running = false;
+
+static int s_discovery_sockfd = -1;
+static int s_handshake_sockfd = -1;
 
 headphones_info_t g_device_info = {
     .name = CONFIG_HEADPHONES_NAME,
@@ -45,19 +53,13 @@ static void init_device_info(void) {
              g_device_info.mac, g_device_info.ipv4);
 }
 
-static void discovery_server_task(void *arg) {
-    int sockfd;
-    struct sockaddr_in server_addr, client_addr;
-    socklen_t client_len = sizeof(client_addr);
-    char buffer[128];
-    int recv_len;
+static int discovery_server_init(void) {
+    struct sockaddr_in server_addr;
 
-    init_device_info();
-    
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        ESP_LOGE(TAG, "Failed to create socket");
-        vTaskDelete(NULL);
-        return;
+    if ((s_discovery_sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        ESP_LOGE(TAG, "Failed to create socket: %s", strerror(errno));
+        s_discovery_sockfd = -1;
+        return -1;
     }
     
     memset(&server_addr, 0, sizeof(server_addr));
@@ -65,28 +67,55 @@ static void discovery_server_task(void *arg) {
     server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
     server_addr.sin_port = htons(DISCOVERY_PORT);
     
-    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        ESP_LOGE(TAG, "Bind failed");
-        close(sockfd);
-        vTaskDelete(NULL);
-        return;
+    if (bind(s_discovery_sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        ESP_LOGE(TAG, "Bind failed: %s", strerror(errno));
+        close(s_discovery_sockfd);
+        s_discovery_sockfd = -1;
+        return -1;
     }
     
     struct ip_mreq mreq;
     mreq.imr_multiaddr.s_addr = inet_addr(MULTICAST_GROUP);
     mreq.imr_interface.s_addr = htonl(INADDR_ANY);
     
-    if (setsockopt(sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
-        ESP_LOGE(TAG, "Multicast group join failed");
-        close(sockfd);
-        vTaskDelete(NULL);
-        return;
+    if (setsockopt(s_discovery_sockfd, IPPROTO_IP, IP_ADD_MEMBERSHIP, &mreq, sizeof(mreq)) < 0) {
+        ESP_LOGE(TAG, "Multicast group join failed: %s", strerror(errno));
+        close(s_discovery_sockfd);
+        s_discovery_sockfd = -1;
+        return -1;
     }
-    
+
+    struct timeval tv = {
+        .tv_sec = DISCOVERY_SOCK_TIMEOUT_MS / 1000,
+        .tv_usec = DISCOVERY_SOCK_TIMEOUT_MS % 1000,
+    };
+    if (setsockopt(s_discovery_sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        ESP_LOGW(TAG, "setsockopt SO_RCVTIMEO failed: %s", strerror(errno));
+    }
+
+    ESP_LOGI(TAG, "Discovery server initialized successfully");
+    return 0;
+}
+
+static void discovery_server_destroy(void) {
+    if (s_discovery_sockfd > 0) {
+        close(s_discovery_sockfd);
+        s_discovery_sockfd = -1;
+    }
+}
+
+static void discovery_server_task(void *arg) {
+    struct sockaddr_in client_addr;
+    socklen_t client_len = sizeof(client_addr);
+    char buffer[128];
+    int recv_len;
+
+    init_device_info();
+
     ESP_LOGI(TAG, "Discovery server started on port %d", DISCOVERY_PORT);
-    
+
     while (s_running) {
-        recv_len = recvfrom(sockfd, buffer, sizeof(buffer) - 1, 0,
+        recv_len = recvfrom(s_discovery_sockfd, buffer, sizeof(buffer) - 1, 0,
                             (struct sockaddr *)&client_addr, &client_len);
         
         if (recv_len > 0) {
@@ -94,36 +123,31 @@ static void discovery_server_task(void *arg) {
             ESP_LOGI(TAG, "received discovery request: \"%s\"", buffer);
 
             if (strcmp(buffer, DISCOVERY_REQUEST) == 0) {
-                if (sendto(sockfd, &g_device_info, sizeof(headphones_info_t), 0,
+                if (sendto(s_discovery_sockfd, &g_device_info, sizeof(headphones_info_t), 0,
                           (struct sockaddr *)&client_addr, client_len) < 0) {
                     ESP_LOGE(TAG, "Failed to send response");
                 }
             }
-        } else if (recv_len < 0) {
-            ESP_LOGE(TAG, "recvfrom failed: errno=%d", errno);
+        } else if (recv_len < 0 && errno != EAGAIN) {   // ignore timeout
+            ESP_LOGE(TAG, "recvfrom failed: errno=%d, strerror=\"%s\"", errno, strerror(errno));
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(10));
     }
     
-    close(sockfd);
     ESP_LOGI(TAG, "Discovery server stopped");
+    s_discovery_hndl = NULL;
     vTaskDelete(NULL);
 }
 
-static void handshake_server_task(void *arg) {
-    int sockfd;
-    char buffer[128];
-    int recv_len;
-
-    if ((sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
-        ESP_LOGE(TAG, "Failed to create socket");
-        vTaskDelete(NULL);
-        return;
+static int handshake_server_init(void) {
+    if ((s_handshake_sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+        ESP_LOGE(TAG, "Failed to create socket: %s", strerror(errno));
+        return -1;
     }
 
-    int opt = 1;
-    setsockopt(sockfd, SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt));
+    int enable = 1;
+    if (setsockopt(s_handshake_sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) < 0) {
+        ESP_LOGW(TAG, "setsockopt SO_REUSEADDR failed: %s", strerror(errno));
+    }
 
     struct sockaddr_in server_addr = {
         .sin_family = AF_INET,
@@ -131,12 +155,34 @@ static void handshake_server_task(void *arg) {
         .sin_addr.s_addr = htonl(INADDR_ANY),
     };
 
-    if (bind(sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
-        ESP_LOGE(TAG, "Bind failed: errno %d", errno);
-        close(sockfd);
-        vTaskDelete(NULL);
-        return;
+    if (bind(s_handshake_sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
+        ESP_LOGE(TAG, "Bind failed: %s", strerror(errno));
+        close(s_handshake_sockfd);
+        return -1;
     }
+
+    struct timeval tv = {
+        .tv_sec = DISCOVERY_SOCK_TIMEOUT_MS / 1000,
+        .tv_usec = DISCOVERY_SOCK_TIMEOUT_MS % 1000,
+    };
+    if (setsockopt(s_handshake_sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        ESP_LOGW(TAG, "setsockopt SO_RCVTIMEO failed: %s", strerror(errno));
+    }
+
+    ESP_LOGI(TAG, "Handshake server initialized successfully");
+    return 0;
+}
+
+static void handshake_server_destroy(void) {
+    if (s_handshake_sockfd > 0) {
+        close(s_handshake_sockfd);
+        s_handshake_sockfd = -1;
+    }
+}
+
+static void handshake_server_task(void *arg) {
+    char buffer[128];
+    int recv_len;
 
     ESP_LOGI(TAG, "Handshake task started");
 
@@ -144,8 +190,8 @@ static void handshake_server_task(void *arg) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
 
-        recv_len = recvfrom(sockfd, buffer, sizeof(buffer), 0, (struct sockaddr *)&client_addr,
-                            &client_len);
+        recv_len = recvfrom(s_handshake_sockfd, buffer, sizeof(buffer), 0,
+                            (struct sockaddr *)&client_addr, &client_len);
 
         char client_ip[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &client_addr.sin_addr, client_ip, sizeof(client_ip));
@@ -155,8 +201,9 @@ static void handshake_server_task(void *arg) {
             ESP_LOGI(TAG, "received handshake request: \"%s\"", buffer);
 
             if (strcmp(buffer, HANDSHAKE_REQUEST) == 0) {
-                ssize_t bytes_sent = sendto(sockfd, HANDSHAKE_RESPONSE, sizeof(HANDSHAKE_RESPONSE),
-                                            0, (struct sockaddr *)&client_addr, client_len);
+                ssize_t bytes_sent = sendto(s_handshake_sockfd, HANDSHAKE_RESPONSE,
+                                            sizeof(HANDSHAKE_RESPONSE), 0,
+                                            (struct sockaddr *)&client_addr, client_len);
                 if (bytes_sent < 0) {
                     ESP_LOGE(TAG, "HANDSHAKE_RESPONSE send failed");
                 }
@@ -171,13 +218,13 @@ static void handshake_server_task(void *arg) {
                     ESP_LOGW(TAG, "Failed to lock g_conn_cfg mutex");
                 }
             }
-        } else if (recv_len < 0) {
-            ESP_LOGE(TAG, "recvfrom failed: errno=%d", errno);
+        } else if (recv_len < 0 && errno != EAGAIN) {   // ignore timeout
+            ESP_LOGE(TAG, "recvfrom failed: errno=%d, strerror=\"%s\"", errno, strerror(errno));
         }
     }
 
-    close(sockfd);
     ESP_LOGI(TAG, "Handshake task stopped");
+    s_handshake_hndl = NULL;
     vTaskDelete(NULL);
 }
 
@@ -190,6 +237,18 @@ void discovery_server_mgr_task(void *arg) {
             pdTRUE,
             portMAX_DELAY
         );
+
+        if (discovery_server_init() != 0) {
+            ESP_LOGE(TAG, "Failed to init discovery server");
+            xEventGroupSetBits(g_event_mgr.events, EV_DISCOVERY_INIT_FAILED);
+            continue;
+        }
+        if (handshake_server_init() != 0) {
+            ESP_LOGE(TAG, "Failed to init handshake server");
+            discovery_server_destroy();
+            xEventGroupSetBits(g_event_mgr.events, EV_DISCOVERY_INIT_FAILED);
+            continue;
+        }
 
         s_running = true;
         xTaskCreate(handshake_server_task, "handshake_server_task", 4096, NULL, 5, &s_handshake_hndl);
@@ -204,8 +263,19 @@ void discovery_server_mgr_task(void *arg) {
         );
 
         s_running = false;
-        vTaskDelay(pdMS_TO_TICKS(500));
-        vTaskDelete(s_handshake_hndl);
-        vTaskDelete(s_discovery_hndl);
+        vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
+        if (s_handshake_hndl != NULL) {
+            vTaskDelete(s_handshake_hndl);
+            s_handshake_hndl = NULL;
+            ESP_LOGW(TAG, "Handshake task did not stop properly, forcing stop");
+        }
+        if (s_discovery_hndl != NULL) {
+            vTaskDelete(s_discovery_hndl);
+            s_discovery_hndl = NULL;
+            ESP_LOGW(TAG, "Discovery task did not stop properly, forcing stop");
+        }
+
+        discovery_server_destroy();
+        handshake_server_destroy();
     }
 }

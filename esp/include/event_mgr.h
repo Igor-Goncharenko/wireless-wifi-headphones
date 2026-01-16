@@ -26,7 +26,9 @@ typedef enum {
     EV_CLIENT_LOST_CONNECTION = BIT4,
     // other
     EV_WIFI_DISCONNECTED = BIT5,
+    // fails
     EV_RTP_INIT_FAILED = BIT6,
+    EV_DISCOVERY_INIT_FAILED = BIT7,
 } system_events_e;
 
 typedef enum {

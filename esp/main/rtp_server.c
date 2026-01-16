@@ -8,6 +8,7 @@
 #include "lwip/sockets.h"
 #include <string.h>
 
+#include "audio.h"
 #include "config.h"
 #include "event_mgr.h"
 #include "protocols/rtp.h"
@@ -20,7 +21,7 @@ static rtp_server_t s_server = { 0 };
 #define RTP_SOCK_TIMEOUT_MS 1000
 #define DELAY_BEFORE_FORCE_TASK_DEL_MS (RTP_SOCK_TIMEOUT_MS + 200)
 
-static int rtp_server_init(RingbufHandle_t *rb) {
+static int rtp_server_init(void) {
     memset(&s_server, 0, sizeof(rtp_server_t));
 
     if ((s_server.sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
@@ -57,7 +58,7 @@ static int rtp_server_init(RingbufHandle_t *rb) {
     s_server.packets_received = 0;
     s_server.packets_lost = 0;
 
-    s_server.rb = rb;
+    s_server.rb = get_rb_ptr();
 
     ESP_LOGI(TAG, "RTP server initialized: sockfd=%d, port=%d", s_server.sockfd, RTP_PORT);
     return 0;
@@ -121,7 +122,7 @@ static void rtp_receiver_task(void *arg) {
             
             const uint8_t *audio_data = buffer + sizeof(rtp_header_t);
             const size_t audio_data_size = recv_len - sizeof(rtp_header_t);
-            UBaseType_t res = xRingbufferSend(s_server.rb, audio_data, audio_data_size,
+            UBaseType_t res = xRingbufferSend(*s_server.rb, audio_data, audio_data_size,
                                               pdMS_TO_TICKS(100));
             if (res != pdTRUE) {
                 ESP_LOGW(TAG, "Ring buffer full, dropped %d bytes", audio_data_size);
@@ -131,8 +132,6 @@ static void rtp_receiver_task(void *arg) {
                          s_server.packets_received, s_server.packets_lost);
             }
         }
-        
-        vTaskDelay(pdMS_TO_TICKS(1));
     }
     
     ESP_LOGI(TAG, "RTP server stopped");
@@ -141,8 +140,6 @@ static void rtp_receiver_task(void *arg) {
 }
 
 void rtp_server_mgr_task(void *arg) {
-    RingbufHandle_t *rb = (RingbufHandle_t *)arg;
-
     while (1) {
         xEventGroupWaitBits(
             g_event_mgr.signals,
@@ -152,7 +149,7 @@ void rtp_server_mgr_task(void *arg) {
             portMAX_DELAY
         );
 
-        if (rtp_server_init(rb) != 0) {
+        if (rtp_server_init() != 0) {
             ESP_LOGE(TAG, "Failed to init rtp server");
             xEventGroupSetBits(g_event_mgr.events, EV_RTP_INIT_FAILED);
             continue;

@@ -5,24 +5,23 @@
 #include "freertos/ringbuf.h"
 #include "driver/i2s_std.h"
 #include "esp_log.h"
+#include <stdbool.h>
 
 #include "event_mgr.h"
 
 static const char *TAG = "WHP " __FILE__;
+static TaskHandle_t s_audio_hndl = NULL;
+static RingbufHandle_t s_rb_hndl = NULL;
+static i2s_chan_handle_t s_i2s_hndl = NULL;
+static bool s_running = false;
 
-typedef struct {
-    audio_t *audio;
-    bool *running;
-} audio_data_t;
+#define I2S_WRITE_TIMEOUT_MS 10
+#define RB_RECV_TIMEOUT_MS 100
+#define DELAY_BEFORE_FORCE_TASK_DEL_MS (RB_RECV_TIMEOUT_MS + 100)
 
-static int init_ringbuf(RingbufHandle_t *rb) {
-    if (rb == NULL) {
-        ESP_LOGE(TAG, "Ringbuf pointer is NULL");
-        return -1;
-    }
-
-    *rb = xRingbufferCreate(RINGBUFFER_SIZE, RINGBUF_TYPE_BYTEBUF);
-    if (*rb == NULL) {
+static int init_ringbuf(void) {
+    s_rb_hndl = xRingbufferCreate(RINGBUFFER_SIZE, RINGBUF_TYPE_BYTEBUF);
+    if (s_rb_hndl == NULL) {
         ESP_LOGE(TAG, "Failed to create ringbuf");
         return -1;
     }
@@ -30,18 +29,20 @@ static int init_ringbuf(RingbufHandle_t *rb) {
     return 0;
 }
 
-static void clear_ringbuf(const RingbufHandle_t rb) {
+static void clear_ringbuf(void) {
     size_t item_size;
     char *item;
 
-    while ((item = (char *)xRingbufferReceive(rb, &item_size, 0))) {
-        vRingbufferReturnItem(rb, item);
+    while ((item = (char *)xRingbufferReceive(s_rb_hndl, &item_size, 0))) {
+        vRingbufferReturnItem(s_rb_hndl, item);
     }
+
+    ESP_LOGI(TAG, "Ringbuf cleared");
 }
 
-static void i2s_init_std_simplex(i2s_chan_handle_t *tx_chan) {
+static void i2s_init_std_simplex(void) {
     i2s_chan_config_t tx_chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_AUTO, I2S_ROLE_MASTER);
-    ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, tx_chan, NULL));
+    ESP_ERROR_CHECK(i2s_new_channel(&tx_chan_cfg, &s_i2s_hndl, NULL));
 
     i2s_std_config_t tx_std_cfg = {
         .clk_cfg  = I2S_STD_CLK_DEFAULT_CONFIG(AUDIO_SAMPLE_RATE),
@@ -59,52 +60,52 @@ static void i2s_init_std_simplex(i2s_chan_handle_t *tx_chan) {
             },
         },
     };
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(*tx_chan, &tx_std_cfg));
+    ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_i2s_hndl, &tx_std_cfg));
 
-    ESP_ERROR_CHECK(i2s_channel_enable(*tx_chan));
+    ESP_ERROR_CHECK(i2s_channel_enable(s_i2s_hndl));
 
     ESP_LOGI(TAG, "Initialized: sample_rate=%d, channels=%d, sample_size=%d",
              AUDIO_SAMPLE_RATE, AUDIO_CHANNELS, AUDIO_SAMPLE_SIZE * 8);
 }
 
-int audio_init(audio_t *audio) {
-    if (init_ringbuf(&audio->rb) != 0) {
-        ESP_LOGE(TAG, "Failed to create ringbuf");
-        return -1;
-    }
-    i2s_init_std_simplex(&audio->i2s);
-
-    return 0;
-}
-
-void audio_play_task(void *arg) {
-    audio_data_t *data = (audio_data_t *)arg;
-    audio_t *ctx = data->audio;
-    bool *running = data->running;
-
+static void audio_play_task(void *arg) {
     size_t item_size;
     uint8_t* item;
 
     ESP_LOGI(TAG, "audio_play_task started");
 
-    while (*running) {
-        item = (uint8_t*)xRingbufferReceive(ctx->rb, &item_size, pdMS_TO_TICKS(100));
+    while (s_running) {
+        item = (uint8_t*)xRingbufferReceive(s_rb_hndl, &item_size,
+                                            pdMS_TO_TICKS(RB_RECV_TIMEOUT_MS));
 
         if (item != NULL) {
             size_t bytes_read;
-            i2s_channel_write(ctx->i2s, item, item_size, &bytes_read, pdMS_TO_TICKS(10));
-            vRingbufferReturnItem(ctx->rb, item);
+            i2s_channel_write(s_i2s_hndl, item, item_size, &bytes_read,
+                              pdMS_TO_TICKS(I2S_WRITE_TIMEOUT_MS));
+            vRingbufferReturnItem(s_rb_hndl, item);
         }
     }
 
-    vTaskDelete(NULL);
     ESP_LOGI(TAG, "audio_play_task stopped");
+    s_rb_hndl = NULL;
+    vTaskDelete(NULL);
+}
+
+int audio_init(void) {
+    if (init_ringbuf() != 0) {
+        ESP_LOGE(TAG, "Failed to create ringbuf");
+        return -1;
+    }
+    i2s_init_std_simplex();
+
+    return 0;
+}
+
+const RingbufHandle_t *get_rb_ptr(void) {
+    return &s_rb_hndl;
 }
 
 void audio_play_mgr(void *arg) {
-    audio_t *audio = (audio_t *)arg;
-    TaskHandle_t audio_hndl = NULL;
-
     while (1) {
         xEventGroupWaitBits(
             g_event_mgr.signals,
@@ -114,13 +115,8 @@ void audio_play_mgr(void *arg) {
             portMAX_DELAY
         );
 
-        bool running = true;
-
-        audio_data_t data = {
-            .running = &running,
-            .audio = audio,
-        };
-        xTaskCreate(audio_play_task, "audio_play_task", 4096, &data, 5, &audio_hndl);
+        s_running = true;
+        xTaskCreate(audio_play_task, "audio_play_task", 4096, NULL, 5, &s_audio_hndl);
 
         xEventGroupWaitBits(
             g_event_mgr.signals,
@@ -130,9 +126,13 @@ void audio_play_mgr(void *arg) {
             portMAX_DELAY
         );
 
-        running = false;
-        vTaskDelay(pdMS_TO_TICKS(100));
-        vTaskDelete(audio_hndl);
-        clear_ringbuf(audio->rb);
+        s_running = false;
+        vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
+        if (s_rb_hndl != NULL) {
+            vTaskDelete(s_audio_hndl);
+            s_rb_hndl = NULL;
+            ESP_LOGW(TAG, "Audio task did not stop properly, forcing stop");
+        }
+        clear_ringbuf();
     }
 }

@@ -35,9 +35,9 @@ typedef struct {
     i2s_chan_handle_t i2s;
 } audio_t;
 
-int audio_init(audio_t *audio);
+int audio_init(void);
 
-void audio_play_task(void *arg);
+const RingbufHandle_t *get_rb_ptr(void);
 
 void audio_play_mgr(void *arg);
 

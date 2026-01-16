@@ -14,7 +14,7 @@ typedef struct {
     uint32_t packets_received;
     uint32_t packets_lost;
 
-    RingbufHandle_t *rb;
+    const RingbufHandle_t *rb;
 } rtp_server_t;
 
 void rtp_server_mgr_task(void *arg);

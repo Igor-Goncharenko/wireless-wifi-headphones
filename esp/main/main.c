@@ -13,7 +13,6 @@ static const char *TAG = "WHP " __FILE__;
 
 void app_main(void) {
     esp_err_t ret;
-    audio_t audio = { 0 };
 
     ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
@@ -26,16 +25,16 @@ void app_main(void) {
         ESP_LOGE(TAG, "Failed to init g_event_mgr");
         return;
     }
-    if (audio_init(&audio) != 0) {
+    if (audio_init() != 0) {
         ESP_LOGE(TAG, "Failed to init audio, aborting");
         return;
     }
     wifi_init_sta();
 
     xTaskCreate(event_mgr_task, "event_mgr_task", 4096, NULL, 5, NULL);
+    xTaskCreate(audio_play_mgr, "audio_play_mgr", 4096, NULL, 5, NULL);
     xTaskCreate(discovery_server_mgr_task, "discovery_server_mgr_task", 4096, NULL, 5, NULL);
-    xTaskCreate(rtp_server_mgr_task, "rtp_server_mgr_task", 4096, &audio.rb, 5, NULL);
-    xTaskCreate(audio_play_mgr, "audio_play_mgr", 4096, &audio, 5, NULL);
+    xTaskCreate(rtp_server_mgr_task, "rtp_server_mgr_task", 4096, NULL, 5, NULL);
 
     while (1) {
         system_events_e events = xEventGroupGetBits(g_event_mgr.states);

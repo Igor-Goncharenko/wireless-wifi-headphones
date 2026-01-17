@@ -9,6 +9,7 @@
 #include "rtp_server.h"
 #include "wifi.h"
 #include "event_mgr.h"
+#include "commands.h"
 
 static const char *TAG = "WHP " __FILE__;
 
@@ -17,6 +18,9 @@ static void safe_restart(void) {
     vTaskDelay(pdMS_TO_TICKS(50));
 
     clear_discovery_before_restart();
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    clear_commands_sock_before_restart();
     vTaskDelay(pdMS_TO_TICKS(50));
 
     audio_deinit_before_restart();
@@ -46,12 +50,13 @@ void app_main(void) {
         ESP_LOGE(TAG, "Failed to init audio, aborting");
         return;
     }
-    wifi_init_sta();
-
     xTaskCreate(event_mgr_task, "event_mgr_task", 4096, NULL, 5, NULL);
     xTaskCreate(audio_play_mgr, "audio_play_mgr", 4096, NULL, 5, NULL);
     xTaskCreate(discovery_server_mgr_task, "discovery_server_mgr_task", 4096, NULL, 5, NULL);
     xTaskCreate(rtp_server_mgr_task, "rtp_server_mgr_task", 4096, NULL, 5, NULL);
+    xTaskCreate(commands_server_mgr_task, "commands_server_mgr_task", 4096, NULL, 5, NULL);
+
+    wifi_init_sta();
 
     //while (1) {
     //    system_events_e events = xEventGroupGetBits(g_event_mgr.states);

@@ -54,7 +54,7 @@ static void handle_state_machine(event_mgr_t *mgr, EventBits_t events, EventBits
 
         switch (mgr->curr_state) {
             case ST_CLIENT_CONNECTED:
-                xEventGroupSetBits(mgr->signals, SIG_STOP_RTP | SIG_STOP_AUDIO);
+                xEventGroupSetBits(mgr->signals, SIG_STOP_RTP | SIG_STOP_AUDIO | SIG_STOP_COMMANDS);
                 xEventGroupClearBits(mgr->states, ST_CLIENT_CONNECTED);
                 break;
             case ST_DISCOVERY_ACTIVE:
@@ -80,7 +80,8 @@ static void handle_state_machine(event_mgr_t *mgr, EventBits_t events, EventBits
             break;
         case ST_DISCOVERY_ACTIVE:
             if (events & EV_CLIENT_CONNECTED) {
-                xEventGroupSetBits(mgr->signals, SIG_START_RTP | SIG_START_AUDIO | SIG_STOP_DISCOVERY);
+                xEventGroupSetBits(mgr->signals, SIG_START_RTP | SIG_START_AUDIO |
+                                   SIG_START_COMMANDS | SIG_STOP_DISCOVERY);
                 xEventGroupSetBits(mgr->states, ST_CLIENT_CONNECTED);
                 xEventGroupClearBits(mgr->states, ST_DISCOVERY_ACTIVE);
                 mgr->curr_state = ST_CLIENT_CONNECTED;
@@ -95,7 +96,8 @@ static void handle_state_machine(event_mgr_t *mgr, EventBits_t events, EventBits
             break;
         case ST_CLIENT_CONNECTED:
             if (events & (EV_CLIENT_LOST_CONNECTION | EV_CLIENT_DISCONNECTED)) {
-                xEventGroupSetBits(mgr->signals, SIG_START_DISCOVERY | SIG_STOP_RTP | SIG_STOP_AUDIO);
+                xEventGroupSetBits(mgr->signals, SIG_START_DISCOVERY | SIG_STOP_RTP |
+                                   SIG_STOP_AUDIO | SIG_STOP_COMMANDS);
                 xEventGroupClearBits(mgr->states, ST_CLIENT_CONNECTED);
                 xEventGroupSetBits(mgr->states, ST_DISCOVERY_ACTIVE);
                 mgr->curr_state = ST_DISCOVERY_ACTIVE;

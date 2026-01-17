@@ -6,10 +6,26 @@
 #include <stdint.h>
 #include <arpa/inet.h>
 
+#include "protocols/headphones.h"
+
+#define HPCMD_QUEUE_SIZE 16
+
+typedef struct {
+    headphones_packet_t data[HPCMD_QUEUE_SIZE];
+    size_t front;
+    size_t back;
+    size_t len;
+
+    pthread_mutex_t mutex;
+    pthread_cond_t new_item_cond;
+} hpcmd_queue_t;
+
 typedef struct {
     int sockfd;
     struct sockaddr_in addr;
     struct sockaddr_in remote_addr;
+
+    hpcmd_queue_t queue;
 
     uint16_t sequence;
     uint32_t timestamp;
@@ -33,5 +49,7 @@ void hpcmd_conn_data_destroy(hpcmd_conn_data_t *data);
 int hpcmd_conn_start(hpcmd_conn_data_t *data, const char ipv4[16]);
 
 void hpcmd_conn_stop(hpcmd_conn_data_t *data);
+
+int hpcmd_send_command(hpcmd_session_t *session, uint8_t command_type);
 
 #endif /* HEADPHONES_COMMANDS_H */

@@ -124,8 +124,11 @@ static void commands_receiver_task(void *arg) {
             .timestamp = ntohl(packet.timestamp),
         };
 
-        // TODO: process command
-        ESP_LOGI(TAG, "Received command: %02x", command.command);
+        // TODO: process all commands
+        ESP_LOGI(TAG, "Received command: 0x%02x", command.command);
+        if (command.command == HP_DISCONNECT) {
+            xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_DISCONNECTED);
+        }
     }
 
     ESP_LOGI(TAG, "Commands receiver task stopped");

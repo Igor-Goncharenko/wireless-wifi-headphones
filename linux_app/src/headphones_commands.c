@@ -13,6 +13,7 @@
 #include "protocols/headphones.h"
 
 #define RECV_ERR_DELAY_US 100000
+#define HPCMD_QUEUE_POP_TIMEOUT_MS 10
 
 static int hpcmd_queue_init(hpcmd_queue_t *q) {
     memset(q, 0, sizeof(hpcmd_queue_t));
@@ -32,6 +33,8 @@ static int hpcmd_queue_init(hpcmd_queue_t *q) {
 }
 
 static void hpcmd_queue_destroy(hpcmd_queue_t *q) {
+    pthread_mutex_lock(&q->mutex);
+    pthread_mutex_unlock(&q->mutex);
     pthread_mutex_destroy(&q->mutex);
     pthread_cond_destroy(&q->new_item_cond);
 }
@@ -48,16 +51,35 @@ static int hpcmd_queue_push(hpcmd_session_t *session, headphones_packet_t *comma
     session->queue.back = (session->queue.back + 1) % HPCMD_QUEUE_SIZE;
     session->queue.len++;
 
+    if (session->queue.len == 1) {
+        pthread_cond_signal(&session->queue.new_item_cond);
+    }
     pthread_mutex_unlock(&session->queue.mutex);
-    pthread_cond_signal(&session->queue.new_item_cond);
     return 0;
 }
 
-static void hpcmd_queue_pop(hpcmd_session_t *session, headphones_packet_t *dest) {
+static bool hpcmd_queue_pop(hpcmd_session_t *session, headphones_packet_t *dest) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    ts.tv_sec += HPCMD_QUEUE_POP_TIMEOUT_MS / 1000;
+    ts.tv_nsec += (HPCMD_QUEUE_POP_TIMEOUT_MS % 1000) * 1000000;
+    if (ts.tv_nsec >= 1000000000) {
+        ts.tv_sec += ts.tv_nsec / 1000000000;
+        ts.tv_nsec %= 1000000000;
+    }
+
     pthread_mutex_lock(&session->queue.mutex);
 
     while (session->queue.len == 0) {
-        pthread_cond_wait(&session->queue.new_item_cond, &session->queue.mutex);
+        int ret = pthread_cond_timedwait(&session->queue.new_item_cond,
+                                         &session->queue.mutex, &ts);
+        if (ret != 0) {
+            if (ret != ETIMEDOUT) {
+                syslog(LOG_ERR, "pthread_cond_timedwait error: %d", ret);
+            }
+            pthread_mutex_unlock(&session->queue.mutex);
+            return false;
+        }
     }
 
     memcpy(dest, &session->queue.data[session->queue.front], sizeof(headphones_packet_t));
@@ -65,6 +87,7 @@ static void hpcmd_queue_pop(hpcmd_session_t *session, headphones_packet_t *dest)
     session->queue.len--;
 
     pthread_mutex_unlock(&session->queue.mutex);
+    return true;
 }
 
 static int hpcmd_session_create(hpcmd_session_t *session, const char ipv4[16], const short port) {
@@ -161,8 +184,10 @@ static void *hpcmd_sender_task(void *arg) {
     headphones_packet_t packet;
     ssize_t sent_size;
 
-    while (conn->is_running) {
-        hpcmd_queue_pop(&conn->session, &packet);
+    while (conn->is_running || conn->session.queue.len > 0) {
+        if (!hpcmd_queue_pop(&conn->session, &packet)) {
+            continue;
+        }
         sent_size = sendto(conn->session.sockfd, &packet, sizeof(headphones_packet_t), 0,
                            (const struct sockaddr *)&conn->session.remote_addr,
                            sizeof(conn->session.remote_addr));
@@ -198,13 +223,14 @@ void hpcmd_conn_stop(hpcmd_conn_data_t *data) {
     data->is_running = false;
     pthread_mutex_unlock(&data->mutex);
 
-    if (data->sender_tid > 0) {
-        pthread_join(data->sender_tid, NULL);
-        data->sender_tid = 0;
-    }
     if (data->receiver_tid > 0) {
         pthread_join(data->receiver_tid, NULL);
         data->receiver_tid = 0;
+    }
+
+    if (data->sender_tid > 0) {
+        pthread_join(data->sender_tid, NULL);
+        data->sender_tid = 0;
     }
 
     pthread_mutex_lock(&data->mutex);
@@ -229,15 +255,15 @@ int hpcmd_conn_start(hpcmd_conn_data_t *data, const char ipv4[16]) {
         return -1;
     }
 
-    if (pthread_create(&data->sender_tid, NULL, hpcmd_sender_task, data) != 0) {
-        syslog(LOG_ERR, "Failed to create HPCMD sender task");
+    if (pthread_create(&data->receiver_tid, NULL, hpcmd_receiver_task, data) != 0) {
+        syslog(LOG_ERR, "Failed to create HPCMD receiver task");
         pthread_mutex_unlock(&data->mutex);
         hpcmd_conn_stop(data);
         return -1;
     }
 
-    if (pthread_create(&data->receiver_tid, NULL, hpcmd_receiver_task, data) != 0) {
-        syslog(LOG_ERR, "Failed to create HPCMD receiver task");
+    if (pthread_create(&data->sender_tid, NULL, hpcmd_sender_task, data) != 0) {
+        syslog(LOG_ERR, "Failed to create HPCMD sender task");
         pthread_mutex_unlock(&data->mutex);
         hpcmd_conn_stop(data);
         return -1;

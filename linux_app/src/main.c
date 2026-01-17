@@ -193,6 +193,7 @@ int main(void) {
         }
         arg->disc_data = &discovery_data;
         arg->conn_data = &connection_data;
+        arg->hpcmd = &hpcmd;
 
         arg->client_fd = accept(sockfd, NULL, NULL);
         if (arg->client_fd < 0) {

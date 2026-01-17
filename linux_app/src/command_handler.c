@@ -8,8 +8,10 @@
 
 #include "discovery.h"
 #include "rtp_client.h"
+#include "headphones_commands.h"
 
 #include "protocols/daemon.h"
+#include "protocols/headphones.h"
 
 void *process_command_task(void *arg) {
     process_command_arg_t *pc_arg = (process_command_arg_t*) arg;
@@ -35,7 +37,8 @@ void *process_command_task(void *arg) {
             if (handshake(pc_arg->cmd.connect.ip4)) {
                 syslog(LOG_INFO, "Handshake with %s success", pc_arg->cmd.connect.ip4);
                 //resp.connect.success = true;
-                if (rtp_connection_start(pc_arg->conn_data, pc_arg->cmd.connect.ip4) != 0) {
+                if (rtp_connection_start(pc_arg->conn_data, pc_arg->cmd.connect.ip4) != 0 ||
+                    hpcmd_conn_start(pc_arg->hpcmd, pc_arg->cmd.connect.ip4) != 0) {
                     syslog(LOG_ERR, "Failed to start connection");
                     resp.connect.success = false;
                 } else {
@@ -48,7 +51,9 @@ void *process_command_task(void *arg) {
             }
             break;
         case DAEMON_CMD_DISCONNECT:
+            hpcmd_send_command(&pc_arg->hpcmd->session, HP_DISCONNECT);
             rtp_connection_stop(pc_arg->conn_data);
+            hpcmd_conn_stop(pc_arg->hpcmd);
             syslog(LOG_INFO, "Disconnecting from device");
             break;
         case DAEMON_CMD_UNKNOWN:

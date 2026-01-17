@@ -12,8 +12,12 @@ typedef struct {
     uint32_t packets_received;
     uint32_t packets_lost;
 
+    uint32_t sender_seq;
+
     struct in_addr allowed_ip4;
 } commands_server_t;
+
+int push_command(uint8_t command_type);
 
 void commands_server_mgr_task(void *arg);
 

@@ -31,6 +31,7 @@ typedef enum {
     // fails
     EV_RTP_INIT_FAILED = BIT6,
     EV_DISCOVERY_INIT_FAILED = BIT7,
+    EV_CMDS_SERVER_INIT_FAILED = BIT8,
 } system_events_e;
 
 typedef enum {

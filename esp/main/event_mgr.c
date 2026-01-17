@@ -103,10 +103,10 @@ static void handle_state_machine(event_mgr_t *mgr, EventBits_t events, EventBits
                 mgr->curr_state = ST_DISCOVERY_ACTIVE;
                 ESP_LOGI(TAG, "Client lost connection (or disconnected)");
             }
-            if (events & EV_RTP_INIT_FAILED) {
+            if (events & (EV_RTP_INIT_FAILED | EV_CMDS_SERVER_INIT_FAILED)) {
                 xEventGroupSetBits(mgr->states, ST_FAILED);
                 mgr->curr_state = ST_FAILED;
-                ESP_LOGE(TAG, "RTP init failed, aborting headphones");
+                ESP_LOGE(TAG, "RTP/Commands init failed, aborting headphones");
                 xEventGroupSetBits(mgr->signals, SIG_RESTART);
             }
             break;

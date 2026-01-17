@@ -99,6 +99,8 @@ static int discovery_server_init(void) {
 
 static void discovery_server_destroy(void) {
     if (s_discovery_sockfd > 0) {
+        shutdown(s_discovery_sockfd, SHUT_RDWR);
+        vTaskDelay(pdMS_TO_TICKS(50));
         close(s_discovery_sockfd);
         s_discovery_sockfd = -1;
     }
@@ -175,6 +177,8 @@ static int handshake_server_init(void) {
 
 static void handshake_server_destroy(void) {
     if (s_handshake_sockfd > 0) {
+        shutdown(s_handshake_sockfd, SHUT_RDWR);
+        vTaskDelay(pdMS_TO_TICKS(50));
         close(s_handshake_sockfd);
         s_handshake_sockfd = -1;
     }
@@ -275,4 +279,22 @@ void discovery_server_mgr_task(void *arg) {
         discovery_server_destroy();
         handshake_server_destroy();
     }
+}
+
+void clear_discovery_before_restart(void) {
+    s_running = false;
+    vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
+    if (s_handshake_hndl != NULL) {
+        vTaskDelete(s_handshake_hndl);
+        s_handshake_hndl = NULL;
+    }
+    if (s_discovery_hndl != NULL) {
+        vTaskDelete(s_discovery_hndl);
+        s_discovery_hndl = NULL;
+    }
+
+    discovery_server_destroy();
+    handshake_server_destroy();
+
+    ESP_LOGI(TAG, "Discovery server cleaned");
 }

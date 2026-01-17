@@ -1,5 +1,6 @@
 #include "audio.h"
 
+#include "driver/i2s_common.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/ringbuf.h"
@@ -128,11 +129,27 @@ void audio_play_mgr(void *arg) {
 
         s_running = false;
         vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
-        if (s_rb_hndl != NULL) {
+        if (s_audio_hndl != NULL) {
             vTaskDelete(s_audio_hndl);
             s_rb_hndl = NULL;
             ESP_LOGW(TAG, "Audio task did not stop properly, forcing stop");
         }
         clear_ringbuf();
     }
+}
+
+void audio_deinit_before_restart(void) {
+    if (s_audio_hndl != NULL) {
+        vTaskSuspend(s_audio_hndl);
+    }
+    if (s_rb_hndl != NULL) {
+        vRingbufferDelete(s_rb_hndl);
+        s_rb_hndl = NULL;
+    }
+    if (s_i2s_hndl != NULL) {
+        i2s_channel_disable(s_i2s_hndl);
+        i2s_del_channel(s_i2s_hndl);
+        s_i2s_hndl = NULL;
+    }
+    ESP_LOGI(TAG, "Audio deinitialized");
 }

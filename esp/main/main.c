@@ -1,4 +1,5 @@
 #include "freertos/FreeRTOS.h"
+#include "freertos/idf_additions.h"
 #include "freertos/task.h"
 #include "esp_log.h"
 #include "nvs_flash.h"
@@ -10,6 +11,22 @@
 #include "event_mgr.h"
 
 static const char *TAG = "WHP " __FILE__;
+
+static void safe_restart(void) {
+    clear_rtp_sock_before_restart();
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    clear_discovery_before_restart();
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    audio_deinit_before_restart();
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    shutdown_wifi_before_restart();
+    vTaskDelay(pdMS_TO_TICKS(50));
+
+    esp_restart();
+}
 
 void app_main(void) {
     esp_err_t ret;
@@ -36,12 +53,23 @@ void app_main(void) {
     xTaskCreate(discovery_server_mgr_task, "discovery_server_mgr_task", 4096, NULL, 5, NULL);
     xTaskCreate(rtp_server_mgr_task, "rtp_server_mgr_task", 4096, NULL, 5, NULL);
 
+    //while (1) {
+    //    system_events_e events = xEventGroupGetBits(g_event_mgr.states);
+    //    if (events & ST_INITIALIZED) ESP_LOGI(TAG, "ST_INITIALIZED");
+    //    if (events & ST_DISCOVERY_ACTIVE) ESP_LOGI(TAG, "ST_DISCOVERY_ACTIVE");
+    //    if (events & ST_CLIENT_CONNECTED) ESP_LOGI(TAG, "ST_CLIENT_CONNECTED");
+    //    if (events & ST_WIFI_CONNECTED) ESP_LOGI(TAG, "ST_WIFI_CONNECTED");
+    //    vTaskDelay(pdMS_TO_TICKS(2000));
+    //}
+
     while (1) {
-        system_events_e events = xEventGroupGetBits(g_event_mgr.states);
-        if (events & ST_INITIALIZED) ESP_LOGI(TAG, "ST_INITIALIZED");
-        if (events & ST_DISCOVERY_ACTIVE) ESP_LOGI(TAG, "ST_DISCOVERY_ACTIVE");
-        if (events & ST_CLIENT_CONNECTED) ESP_LOGI(TAG, "ST_CLIENT_CONNECTED");
-        if (events & ST_WIFI_CONNECTED) ESP_LOGI(TAG, "ST_WIFI_CONNECTED");
-        vTaskDelay(pdMS_TO_TICKS(2000));
+        xEventGroupWaitBits(
+            g_event_mgr.signals,
+            SIG_RESTART,
+            pdTRUE,
+            pdTRUE,
+            portMAX_DELAY
+        );
+        safe_restart();
     }
 }

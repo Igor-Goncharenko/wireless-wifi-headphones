@@ -6,6 +6,8 @@
 #include "freertos/semphr.h"
 #include "lwip/sockets.h"
 
+#define ALL_USER_BITS 0xFFFFFFU
+
 typedef enum {
     ST_INITIALIZED = BIT0,
     ST_DISCOVERY_ACTIVE = BIT1,
@@ -32,13 +34,15 @@ typedef enum {
 } system_events_e;
 
 typedef enum {
-    SIG_RECONNECT_WIFI = BIT0,
-    SIG_START_DISCOVERY = BIT1,
-    SIG_STOP_DISCOVERY = BIT2,
-    SIG_START_RTP = BIT3,
-    SIG_STOP_RTP = BIT4,
-    SIG_START_AUDIO = BIT5,
-    SIG_STOP_AUDIO = BIT6,
+    SIG_START_DISCOVERY = BIT0,
+    SIG_STOP_DISCOVERY = BIT1,
+    SIG_START_RTP = BIT2,
+    SIG_STOP_RTP = BIT3,
+    SIG_START_AUDIO = BIT4,
+    SIG_STOP_AUDIO = BIT5,
+
+    SIG_RESTART = BIT10,
+    SIG_RECONNECT_WIFI = BIT11,
 } system_signals_e;
 
 typedef struct {

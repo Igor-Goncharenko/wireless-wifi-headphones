@@ -9,4 +9,6 @@ extern headphones_info_t g_device_info;
 
 void discovery_server_mgr_task(void *arg);
 
+void clear_discovery_before_restart(void);
+
 #endif /* DISCOVERY_SERVER_H */

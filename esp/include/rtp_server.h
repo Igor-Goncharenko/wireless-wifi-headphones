@@ -20,4 +20,6 @@ typedef struct {
 
 void rtp_server_mgr_task(void *arg);
 
+void clear_rtp_sock_before_restart(void);
+
 #endif /* RTP_SERVER_H */

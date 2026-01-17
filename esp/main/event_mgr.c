@@ -86,6 +86,12 @@ static void handle_state_machine(event_mgr_t *mgr, EventBits_t events, EventBits
                 mgr->curr_state = ST_CLIENT_CONNECTED;
                 ESP_LOGI(TAG, "WiFi connected, starting discovery");
             }
+            if (events & EV_DISCOVERY_INIT_FAILED) {
+                xEventGroupSetBits(mgr->states, ST_FAILED);
+                mgr->curr_state = ST_FAILED;
+                ESP_LOGE(TAG, "Discovery init failed, aborting headphones");
+                xEventGroupSetBits(mgr->signals, SIG_RESTART);
+            }
             break;
         case ST_CLIENT_CONNECTED:
             if (events & (EV_CLIENT_LOST_CONNECTION | EV_CLIENT_DISCONNECTED)) {
@@ -96,11 +102,10 @@ static void handle_state_machine(event_mgr_t *mgr, EventBits_t events, EventBits
                 ESP_LOGI(TAG, "Client lost connection (or disconnected)");
             }
             if (events & EV_RTP_INIT_FAILED) {
-                xEventGroupClearBits(mgr->states, 0xFFFFFF);
                 xEventGroupSetBits(mgr->states, ST_FAILED);
                 mgr->curr_state = ST_FAILED;
                 ESP_LOGE(TAG, "RTP init failed, aborting headphones");
-                // TODO: should reboot somehow
+                xEventGroupSetBits(mgr->signals, SIG_RESTART);
             }
             break;
         default:
@@ -116,7 +121,7 @@ void event_mgr_task(void *arg) {
     while (1) {
         new_events = xEventGroupWaitBits(
             g_event_mgr.events,
-            0xFF,
+            ALL_USER_BITS,
             pdTRUE,
             pdFALSE,
             portMAX_DELAY

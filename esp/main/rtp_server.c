@@ -67,6 +67,7 @@ static int rtp_server_init(void) {
 
 static void rtp_server_destroy() {
     if (s_server.sockfd > 0) {
+        shutdown(s_server.sockfd, SHUT_RDWR);
         close(s_server.sockfd);
     }
 
@@ -182,4 +183,16 @@ void rtp_server_mgr_task(void *arg) {
         }
         rtp_server_destroy();
     }
+}
+
+void clear_rtp_sock_before_restart(void) {
+    s_running = false;
+    vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
+    if (s_rtp_hndl != NULL) {
+        vTaskDelete(s_rtp_hndl);
+        s_rtp_hndl = NULL;
+    }
+    rtp_server_destroy();
+
+    ESP_LOGI(TAG, "RTP server cleaned");
 }

@@ -147,6 +147,28 @@ static void rtp_receiver_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+static void rtp_start(void) {
+    if (rtp_server_init() != 0) {
+        ESP_LOGE(TAG, "Failed to init rtp server");
+        xEventGroupSetBits(g_event_mgr.events, EV_RTP_INIT_FAILED);
+        return;
+    }
+
+    s_running = true;
+    xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, NULL, 5, &s_rtp_hndl);
+}
+
+static void rtp_stop(void) {
+    s_running = false;
+    vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
+    if (s_rtp_hndl != NULL) {
+        vTaskDelete(s_rtp_hndl);
+        s_rtp_hndl = NULL;
+        ESP_LOGW(TAG, "RTP task did not stop properly, forcing stop");
+    }
+    rtp_server_destroy();
+}
+
 void rtp_server_mgr_task(void *arg) {
     while (1) {
         xEventGroupWaitBits(
@@ -157,14 +179,7 @@ void rtp_server_mgr_task(void *arg) {
             portMAX_DELAY
         );
 
-        if (rtp_server_init() != 0) {
-            ESP_LOGE(TAG, "Failed to init rtp server");
-            xEventGroupSetBits(g_event_mgr.events, EV_RTP_INIT_FAILED);
-            continue;
-        }
-
-        s_running = true;
-        xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, NULL, 5, &s_rtp_hndl);
+        rtp_start();
 
         xEventGroupWaitBits(
             g_event_mgr.signals,
@@ -174,25 +189,16 @@ void rtp_server_mgr_task(void *arg) {
             portMAX_DELAY
         );
 
-        s_running = false;
-        vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
-        if (s_rtp_hndl != NULL) {
-            vTaskDelete(s_rtp_hndl);
-            s_rtp_hndl = NULL;
-            ESP_LOGW(TAG, "RTP task did not stop properly, forcing stop");
-        }
-        rtp_server_destroy();
+        rtp_stop();
     }
 }
 
 void clear_rtp_sock_before_restart(void) {
-    s_running = false;
-    vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
-    if (s_rtp_hndl != NULL) {
-        vTaskDelete(s_rtp_hndl);
-        s_rtp_hndl = NULL;
+    if (s_running) {
+        rtp_stop();
+    } else {
+        // if the rtp_stop has not yet ended
+        vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
     }
-    rtp_server_destroy();
-
     ESP_LOGI(TAG, "RTP server cleaned");
 }

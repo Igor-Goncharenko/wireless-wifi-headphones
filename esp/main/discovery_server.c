@@ -229,6 +229,42 @@ static void handshake_server_task(void *arg) {
     vTaskDelete(NULL);
 }
 
+static void discovery_start(void) {
+    if (discovery_server_init() != 0) {
+        ESP_LOGE(TAG, "Failed to init discovery server");
+        xEventGroupSetBits(g_event_mgr.events, EV_DISCOVERY_INIT_FAILED);
+        return;
+    }
+    if (handshake_server_init() != 0) {
+        ESP_LOGE(TAG, "Failed to init handshake server");
+        discovery_server_destroy();
+        xEventGroupSetBits(g_event_mgr.events, EV_DISCOVERY_INIT_FAILED);
+        return;
+    }
+
+    s_running = true;
+    xTaskCreate(handshake_server_task, "handshake_server_task", 4096, NULL, 5, &s_handshake_hndl);
+    xTaskCreate(discovery_server_task, "discovery_server_task", 4096, NULL, 5, &s_discovery_hndl);
+}
+
+static void discovery_stop(void) {
+    s_running = false;
+    vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
+    if (s_handshake_hndl != NULL) {
+        vTaskDelete(s_handshake_hndl);
+        s_handshake_hndl = NULL;
+        ESP_LOGW(TAG, "Handshake task did not stop properly, forcing stop");
+    }
+    if (s_discovery_hndl != NULL) {
+        vTaskDelete(s_discovery_hndl);
+        s_discovery_hndl = NULL;
+        ESP_LOGW(TAG, "Discovery task did not stop properly, forcing stop");
+    }
+
+    discovery_server_destroy();
+    handshake_server_destroy();
+}
+
 void discovery_server_mgr_task(void *arg) {
     while (1) {
         xEventGroupWaitBits(
@@ -239,21 +275,7 @@ void discovery_server_mgr_task(void *arg) {
             portMAX_DELAY
         );
 
-        if (discovery_server_init() != 0) {
-            ESP_LOGE(TAG, "Failed to init discovery server");
-            xEventGroupSetBits(g_event_mgr.events, EV_DISCOVERY_INIT_FAILED);
-            continue;
-        }
-        if (handshake_server_init() != 0) {
-            ESP_LOGE(TAG, "Failed to init handshake server");
-            discovery_server_destroy();
-            xEventGroupSetBits(g_event_mgr.events, EV_DISCOVERY_INIT_FAILED);
-            continue;
-        }
-
-        s_running = true;
-        xTaskCreate(handshake_server_task, "handshake_server_task", 4096, NULL, 5, &s_handshake_hndl);
-        xTaskCreate(discovery_server_task, "discovery_server_task", 4096, NULL, 5, &s_discovery_hndl);
+        discovery_start();
 
         xEventGroupWaitBits(
             g_event_mgr.signals,
@@ -263,38 +285,16 @@ void discovery_server_mgr_task(void *arg) {
             portMAX_DELAY
         );
 
-        s_running = false;
-        vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
-        if (s_handshake_hndl != NULL) {
-            vTaskDelete(s_handshake_hndl);
-            s_handshake_hndl = NULL;
-            ESP_LOGW(TAG, "Handshake task did not stop properly, forcing stop");
-        }
-        if (s_discovery_hndl != NULL) {
-            vTaskDelete(s_discovery_hndl);
-            s_discovery_hndl = NULL;
-            ESP_LOGW(TAG, "Discovery task did not stop properly, forcing stop");
-        }
-
-        discovery_server_destroy();
-        handshake_server_destroy();
+        discovery_stop();
     }
 }
 
 void clear_discovery_before_restart(void) {
-    s_running = false;
-    vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
-    if (s_handshake_hndl != NULL) {
-        vTaskDelete(s_handshake_hndl);
-        s_handshake_hndl = NULL;
+    if (s_running) {
+        discovery_stop();
+    } else {
+        // if the discovery_stop has not yet ended
+        vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
     }
-    if (s_discovery_hndl != NULL) {
-        vTaskDelete(s_discovery_hndl);
-        s_discovery_hndl = NULL;
-    }
-
-    discovery_server_destroy();
-    handshake_server_destroy();
-
     ESP_LOGI(TAG, "Discovery server cleaned");
 }

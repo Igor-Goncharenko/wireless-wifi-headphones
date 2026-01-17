@@ -15,6 +15,8 @@
 #define RECV_ERR_DELAY_US 100000
 #define HPCMD_QUEUE_POP_TIMEOUT_MS 10
 
+#define HPCMD_SOCK_TIMEOUT_MS 1000
+
 static int hpcmd_queue_init(hpcmd_queue_t *q) {
     memset(q, 0, sizeof(hpcmd_queue_t));
     q->front = 0;
@@ -91,10 +93,23 @@ static bool hpcmd_queue_pop(hpcmd_session_t *session, headphones_packet_t *dest)
 }
 
 static int hpcmd_session_create(hpcmd_session_t *session, const char ipv4[16], const short port) {
-    if ((session->sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
+    if ((session->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
         syslog(LOG_ERR, "HPCMD socket creating failed, errno=%d, strerror=\"%s\"",
                errno, strerror(errno));
         return -1;
+    }
+
+    int enable = 1;
+    if (setsockopt(session->sockfd, SOL_SOCKET, SO_REUSEADDR, &enable, sizeof(enable)) < 0) {
+        syslog(LOG_WARNING, "setsockopt SO_REUSEADDR failed: %s", strerror(errno));
+    }
+
+    struct timeval tv = {
+        .tv_sec = HPCMD_SOCK_TIMEOUT_MS / 1000,
+        .tv_usec = HPCMD_SOCK_TIMEOUT_MS % 1000,
+    };
+    if (setsockopt(session->sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
+        syslog(LOG_WARNING, "setsockopt SO_RCVTIMEO failed: %s", strerror(errno));
     }
 
     memset(&session->addr, 0, sizeof(session->addr));

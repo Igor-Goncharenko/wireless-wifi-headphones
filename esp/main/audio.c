@@ -88,7 +88,7 @@ static void audio_play_task(void *arg) {
     }
 
     ESP_LOGI(TAG, "audio_play_task stopped");
-    s_rb_hndl = NULL;
+    s_audio_hndl = NULL;
     vTaskDelete(NULL);
 }
 

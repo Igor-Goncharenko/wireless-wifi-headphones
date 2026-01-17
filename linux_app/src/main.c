@@ -15,6 +15,7 @@
 #include "config.h"
 #include "command_handler.h"
 #include "discovery.h"
+#include "headphones_commands.h"
 #include "ringbuf.h"
 #include "rtp_client.h"
 
@@ -119,6 +120,7 @@ int main(void) {
     discovery_data_t discovery_data = { 0 };
     rtp_connection_data_t connection_data = { 0 };
     pulse_audio_t pulse = { 0 };
+    hpcmd_conn_data_t hpcmd = { 0 };
 
     ret = daemon_init();
     if (ret == 1) {
@@ -172,6 +174,17 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
+    if (hpcmd_conn_data_init(&hpcmd) != 0) {
+        syslog(LOG_ERR, "Failed to init hpcmd conn data");
+        daemon_cleanup();
+        audio_destroy(&pulse);
+        close_socket(sockfd);
+        discovery_data_destroy(&discovery_data);
+        rtp_connection_data_destroy(&connection_data);
+        closelog();
+        return EXIT_FAILURE;
+    }
+
     while (keep_running) {
         process_command_arg_t *arg = malloc(sizeof(process_command_arg_t));
         if (!arg) {
@@ -214,6 +227,7 @@ int main(void) {
     close_socket(sockfd);
     discovery_data_destroy(&discovery_data);
     rtp_connection_data_destroy(&connection_data);
+    hpcmd_conn_data_destroy(&hpcmd);
     closelog();
 
     return EXIT_SUCCESS;

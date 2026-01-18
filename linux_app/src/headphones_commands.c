@@ -143,13 +143,16 @@ static void hpcmd_session_destroy(hpcmd_session_t *session) {
     memset(session, 0, sizeof(hpcmd_session_t));
 }
 
-static void process_command(headphones_packet_t command) {
+static void process_command(hpcmd_conn_data_t *conn, headphones_packet_t command) {
     switch (command.command) {
         case HPCMD_NO_COMMAND:
             break;
         case HPCMD_PING:
             break;
         case HPCMD_DISCONNECT:
+            rtp_connection_stop(conn->rtp_conn_ptr);
+            hpcmd_conn_stop(conn);
+            syslog(LOG_INFO, "Disconnecting from device");
             break;
         default:
             syslog(LOG_WARNING, "Unprocessed headphones command 0x%02x", command.command);
@@ -202,7 +205,7 @@ static void *hpcmd_receiver_task(void *arg) {
         };
 
         syslog(LOG_INFO, "HPCMD received command %02x", command.command);
-        process_command(command);
+        process_command(conn, command);
     }
 
     return NULL;

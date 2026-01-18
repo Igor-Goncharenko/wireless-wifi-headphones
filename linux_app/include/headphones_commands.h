@@ -7,6 +7,7 @@
 #include <arpa/inet.h>
 
 #include "protocols/headphones.h"
+#include "rtp_client.h"
 
 #define HPCMD_QUEUE_SIZE 16
 
@@ -40,6 +41,7 @@ typedef struct {
     pthread_mutex_t mutex;
 
     hpcmd_session_t session;
+    rtp_connection_data_t *rtp_conn_ptr;    // used to disconnect client
 } hpcmd_conn_data_t;
 
 int hpcmd_conn_data_init(hpcmd_conn_data_t *data);

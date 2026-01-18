@@ -184,6 +184,7 @@ int main(void) {
         closelog();
         return EXIT_FAILURE;
     }
+    hpcmd.rtp_conn_ptr = &connection_data;
 
     while (keep_running) {
         process_command_arg_t *arg = malloc(sizeof(process_command_arg_t));

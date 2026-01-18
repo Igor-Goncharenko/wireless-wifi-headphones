@@ -51,7 +51,7 @@ void *process_command_task(void *arg) {
             }
             break;
         case DAEMON_CMD_DISCONNECT:
-            hpcmd_send_command(&pc_arg->hpcmd->session, HP_DISCONNECT);
+            hpcmd_send_command(&pc_arg->hpcmd->session, HPCMD_DISCONNECT);
             rtp_connection_stop(pc_arg->conn_data);
             hpcmd_conn_stop(pc_arg->hpcmd);
             syslog(LOG_INFO, "Disconnecting from device");

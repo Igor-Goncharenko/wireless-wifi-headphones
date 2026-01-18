@@ -143,6 +143,20 @@ static void hpcmd_session_destroy(hpcmd_session_t *session) {
     memset(session, 0, sizeof(hpcmd_session_t));
 }
 
+static void process_command(headphones_packet_t command) {
+    switch (command.command) {
+        case HPCMD_NO_COMMAND:
+            break;
+        case HPCMD_PING:
+            break;
+        case HPCMD_DISCONNECT:
+            break;
+        default:
+            syslog(LOG_WARNING, "Unprocessed headphones command 0x%02x", command.command);
+            break;
+    }
+}
+
 static void *hpcmd_receiver_task(void *arg) {
     hpcmd_conn_data_t *conn = (hpcmd_conn_data_t *)arg;
     struct sockaddr_in client_addr;
@@ -187,8 +201,8 @@ static void *hpcmd_receiver_task(void *arg) {
             .timestamp = ntohl(packet.timestamp),
         };
 
-        // TODO: process command
         syslog(LOG_INFO, "HPCMD received command %02x", command.command);
+        process_command(command);
     }
 
     return NULL;

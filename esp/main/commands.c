@@ -80,6 +80,21 @@ static void commands_server_destroy() {
     ESP_LOGI(TAG, "Commands server destroyed");
 }
 
+static void process_command(headphones_packet_t command) {
+    switch (command.command) {
+        case HPCMD_NO_COMMAND:
+            break;
+        case HPCMD_PING:
+            break;
+        case HPCMD_DISCONNECT:
+            xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_DISCONNECTED);
+            break;
+        default:
+            ESP_LOGW(TAG, "Unprocessed headphones command 0x%02x", command.command);
+            break;
+    }
+}
+
 static void commands_receiver_task(void *arg) {
     struct sockaddr_in client_addr;
     socklen_t client_len = sizeof(client_addr);
@@ -124,11 +139,8 @@ static void commands_receiver_task(void *arg) {
             .timestamp = ntohl(packet.timestamp),
         };
 
-        // TODO: process all commands
         ESP_LOGI(TAG, "Received command: 0x%02x", command.command);
-        if (command.command == HP_DISCONNECT) {
-            xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_DISCONNECTED);
-        }
+        process_command(command);
     }
 
     ESP_LOGI(TAG, "Commands receiver task stopped");

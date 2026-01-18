@@ -22,11 +22,19 @@ typedef struct {
 } hpcmd_queue_t;
 
 typedef struct {
+    uint16_t send_sequence;
+
+    uint16_t recv_sequence;
+    uint32_t recv_timestamp;
+} hpcmd_ping_data_t;
+
+typedef struct {
     int sockfd;
     struct sockaddr_in addr;
     struct sockaddr_in remote_addr;
 
     hpcmd_queue_t queue;
+    hpcmd_ping_data_t ping;
 
     uint16_t sequence;
     uint32_t timestamp;
@@ -36,6 +44,7 @@ typedef struct {
     bool has_active_session;
     bool is_running;
 
+    pthread_t ping_tid;
     pthread_t sender_tid;
     pthread_t receiver_tid;
     pthread_mutex_t mutex;

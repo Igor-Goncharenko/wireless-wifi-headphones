@@ -92,6 +92,14 @@ static bool hpcmd_queue_pop(hpcmd_session_t *session, headphones_packet_t *dest)
     return true;
 }
 
+static int hpcmd_ping_data_init(hpcmd_ping_data_t *data) {
+    memset(data, 0, sizeof(hpcmd_ping_data_t));
+    data->send_sequence = 0;
+    data->recv_sequence = 0;
+    data->recv_timestamp = 0;
+    return 0;
+}
+
 static int hpcmd_session_create(hpcmd_session_t *session, const char ipv4[16], const short port) {
     if ((session->sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
         syslog(LOG_ERR, "HPCMD socket creating failed, errno=%d, strerror=\"%s\"",
@@ -126,6 +134,12 @@ static int hpcmd_session_create(hpcmd_session_t *session, const char ipv4[16], c
 
     if (hpcmd_queue_init(&session->queue) != 0) {
         syslog(LOG_ERR, "HPCMD failed to init session queue");
+        close(session->sockfd);
+        return -1;
+    }
+
+    if (hpcmd_ping_data_init(&session->ping) != 0) {
+        syslog(LOG_ERR, "HPCMD failed to init session ping data");
         close(session->sockfd);
         return -1;
     }
@@ -250,6 +264,22 @@ static void *hpcmd_sender_task(void *arg) {
     return NULL;
 }
 
+static void *hpcmd_ping_task(void *arg) {
+    hpcmd_conn_data_t *conn = (hpcmd_conn_data_t *)arg;
+
+    while (conn->is_running) {
+        headphones_packet_t command = {
+            .command = HPCMD_PING,
+            .sequence = htons(conn->session.ping.send_sequence++),
+            .timestamp = htonl((uint32_t)time(NULL)),
+        };
+        hpcmd_queue_push(&conn->session, &command);
+        usleep(PING_INTERVAL_MS * 1000);
+    }
+
+    return NULL;
+}
+
 void hpcmd_conn_stop(hpcmd_conn_data_t *data) {
     pthread_mutex_lock(&data->mutex);
     data->is_running = false;
@@ -262,6 +292,11 @@ void hpcmd_conn_stop(hpcmd_conn_data_t *data) {
 
     if (data->sender_tid > 0) {
         pthread_join(data->sender_tid, NULL);
+        data->sender_tid = 0;
+    }
+
+    if (data->ping_tid > 0) {
+        pthread_join(data->ping_tid, NULL);
         data->sender_tid = 0;
     }
 
@@ -296,6 +331,13 @@ int hpcmd_conn_start(hpcmd_conn_data_t *data, const char ipv4[16]) {
 
     if (pthread_create(&data->sender_tid, NULL, hpcmd_sender_task, data) != 0) {
         syslog(LOG_ERR, "Failed to create HPCMD sender task");
+        pthread_mutex_unlock(&data->mutex);
+        hpcmd_conn_stop(data);
+        return -1;
+    }
+
+    if (pthread_create(&data->sender_tid, NULL, hpcmd_ping_task, data) != 0) {
+        syslog(LOG_ERR, "Failed to create HPCMD ping task");
         pthread_mutex_unlock(&data->mutex);
         hpcmd_conn_stop(data);
         return -1;

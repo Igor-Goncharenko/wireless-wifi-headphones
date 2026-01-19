@@ -18,7 +18,6 @@
 #define HPCMD_SOCK_TIMEOUT_MS 1000
 
 static int hpcmd_queue_init(hpcmd_queue_t *q) {
-    memset(q, 0, sizeof(hpcmd_queue_t));
     q->front = 0;
     q->back = 0;
     q->len = 0;
@@ -35,8 +34,6 @@ static int hpcmd_queue_init(hpcmd_queue_t *q) {
 }
 
 static void hpcmd_queue_destroy(hpcmd_queue_t *q) {
-    pthread_mutex_lock(&q->mutex);
-    pthread_mutex_unlock(&q->mutex);
     pthread_mutex_destroy(&q->mutex);
     pthread_cond_destroy(&q->new_item_cond);
 }
@@ -53,14 +50,14 @@ static int hpcmd_queue_push(hpcmd_session_t *session, headphones_packet_t *comma
     session->queue.back = (session->queue.back + 1) % HPCMD_QUEUE_SIZE;
     session->queue.len++;
 
-    if (session->queue.len == 1) {
-        pthread_cond_signal(&session->queue.new_item_cond);
-    }
+    pthread_cond_signal(&session->queue.new_item_cond);
     pthread_mutex_unlock(&session->queue.mutex);
     return 0;
 }
 
 static bool hpcmd_queue_pop(hpcmd_session_t *session, headphones_packet_t *dest) {
+    pthread_mutex_lock(&session->queue.mutex);
+
     struct timespec ts;
     clock_gettime(CLOCK_MONOTONIC, &ts);
     ts.tv_sec += HPCMD_QUEUE_POP_TIMEOUT_MS / 1000;
@@ -69,8 +66,6 @@ static bool hpcmd_queue_pop(hpcmd_session_t *session, headphones_packet_t *dest)
         ts.tv_sec += ts.tv_nsec / 1000000000;
         ts.tv_nsec %= 1000000000;
     }
-
-    pthread_mutex_lock(&session->queue.mutex);
 
     while (session->queue.len == 0) {
         int ret = pthread_cond_timedwait(&session->queue.new_item_cond,
@@ -152,9 +147,14 @@ static int hpcmd_session_create(hpcmd_session_t *session, const char ipv4[16], c
 static void hpcmd_session_destroy(hpcmd_session_t *session) {
     if (session->sockfd > 0) {
         close(session->sockfd);
+        session->sockfd = -1;
     }
+    session->sequence = 0;
+    session->timestamp = 0;
+    memset(&session->addr, 0, sizeof(struct sockaddr_in));
+    memset(&session->remote_addr, 0, sizeof(struct sockaddr_in));
+    memset(&session->ping, 0, sizeof(session->ping));
     hpcmd_queue_destroy(&session->queue);
-    memset(session, 0, sizeof(hpcmd_session_t));
 }
 
 static void process_command(hpcmd_conn_data_t *conn, headphones_packet_t command) {
@@ -165,7 +165,7 @@ static void process_command(hpcmd_conn_data_t *conn, headphones_packet_t command
             break;
         case HPCMD_DISCONNECT:
             rtp_connection_stop(conn->rtp_conn_ptr);
-            hpcmd_conn_stop(conn);
+            hpcmd_conn_stop(conn);  // FIXME: thread stops itself
             syslog(LOG_INFO, "Disconnecting from device");
             break;
         default:
@@ -297,7 +297,7 @@ void hpcmd_conn_stop(hpcmd_conn_data_t *data) {
 
     if (data->ping_tid > 0) {
         pthread_join(data->ping_tid, NULL);
-        data->sender_tid = 0;
+        data->ping_tid = 0;
     }
 
     pthread_mutex_lock(&data->mutex);
@@ -314,6 +314,8 @@ int hpcmd_conn_start(hpcmd_conn_data_t *data, const char ipv4[16]) {
         pthread_mutex_unlock(&data->mutex);
         return -1;
     }
+
+    data->is_running = true;
 
     if (hpcmd_session_create(&data->session, ipv4, HEADPHONES_CMD_PORT) != 0) {
         syslog(LOG_ERR, "Failed to create HPCMD session");
@@ -336,7 +338,7 @@ int hpcmd_conn_start(hpcmd_conn_data_t *data, const char ipv4[16]) {
         return -1;
     }
 
-    if (pthread_create(&data->sender_tid, NULL, hpcmd_ping_task, data) != 0) {
+    if (pthread_create(&data->ping_tid, NULL, hpcmd_ping_task, data) != 0) {
         syslog(LOG_ERR, "Failed to create HPCMD ping task");
         pthread_mutex_unlock(&data->mutex);
         hpcmd_conn_stop(data);
@@ -344,14 +346,11 @@ int hpcmd_conn_start(hpcmd_conn_data_t *data, const char ipv4[16]) {
     }
 
     data->has_active_session = true;
-    data->is_running = true;
     pthread_mutex_unlock(&data->mutex);
     return 0;
 }
 
-int hpcmd_conn_data_init(hpcmd_conn_data_t *data) {
-    memset(data, 0, sizeof(hpcmd_conn_data_t));
-
+int hpcmd_conn_data_init(hpcmd_conn_data_t *data, rtp_connection_data_t *rtp_conn_ptr) {
     if (pthread_mutex_init(&data->mutex, NULL) != 0) {
         syslog(LOG_ERR, "HPCMD connection mutex init failed");
         return -1;
@@ -361,6 +360,8 @@ int hpcmd_conn_data_init(hpcmd_conn_data_t *data) {
     data->is_running = false;
     data->receiver_tid = 0;
     data->sender_tid = 0;
+
+    data->rtp_conn_ptr = rtp_conn_ptr;
 
     return 0;
 }

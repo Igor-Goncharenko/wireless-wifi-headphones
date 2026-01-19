@@ -174,7 +174,7 @@ int main(void) {
         return EXIT_FAILURE;
     }
 
-    if (hpcmd_conn_data_init(&hpcmd) != 0) {
+    if (hpcmd_conn_data_init(&hpcmd, &connection_data) != 0) {
         syslog(LOG_ERR, "Failed to init hpcmd conn data");
         daemon_cleanup();
         audio_destroy(&pulse);
@@ -184,7 +184,6 @@ int main(void) {
         closelog();
         return EXIT_FAILURE;
     }
-    hpcmd.rtp_conn_ptr = &connection_data;
 
     while (keep_running) {
         process_command_arg_t *arg = malloc(sizeof(process_command_arg_t));

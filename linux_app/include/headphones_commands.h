@@ -42,7 +42,7 @@ typedef struct {
 
 typedef struct {
     bool has_active_session;
-    bool is_running;
+    volatile bool is_running;
 
     pthread_t ping_tid;
     pthread_t sender_tid;
@@ -53,7 +53,7 @@ typedef struct {
     rtp_connection_data_t *rtp_conn_ptr;    // used to disconnect client
 } hpcmd_conn_data_t;
 
-int hpcmd_conn_data_init(hpcmd_conn_data_t *data);
+int hpcmd_conn_data_init(hpcmd_conn_data_t *data, rtp_connection_data_t *rtp_conn_ptr);
 
 void hpcmd_conn_data_destroy(hpcmd_conn_data_t *data);
 

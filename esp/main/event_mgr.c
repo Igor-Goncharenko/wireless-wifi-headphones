@@ -42,79 +42,79 @@ void destroy_event_mgr(void) {
     ESP_LOGI(TAG, "g_event_mgr destroyed");
 }
 
-static void handle_state_machine(event_mgr_t *mgr, EventBits_t events, EventBits_t states) {
-    if (xSemaphoreTake(mgr->mutex, pdMS_TO_TICKS(50)) == pdFALSE) {
+static void handle_state_machine(EventBits_t events, EventBits_t states) {
+    if (xSemaphoreTake(g_event_mgr.mutex, pdMS_TO_TICKS(50)) == pdFALSE) {
         ESP_LOGE(TAG, "Failed to take mgr mutex");
         return;
     }
     if (events & EV_WIFI_DISCONNECTED) {
-        xEventGroupClearBits(mgr->states, ST_WIFI_CONNECTED);
-        xEventGroupSetBits(mgr->signals, SIG_RECONNECT_WIFI);
-        mgr->curr_state = ST_INITIALIZED;
+        xEventGroupClearBits(g_event_mgr.states, ST_WIFI_CONNECTED);
+        xEventGroupSetBits(g_event_mgr.signals, SIG_RECONNECT_WIFI);
+        g_event_mgr.curr_state = ST_INITIALIZED;
 
-        switch (mgr->curr_state) {
+        switch (g_event_mgr.curr_state) {
             case ST_CLIENT_CONNECTED:
-                xEventGroupSetBits(mgr->signals, SIG_STOP_RTP | SIG_STOP_AUDIO | SIG_STOP_COMMANDS);
-                xEventGroupClearBits(mgr->states, ST_CLIENT_CONNECTED);
+                xEventGroupSetBits(g_event_mgr.signals, SIG_STOP_RTP | SIG_STOP_AUDIO | SIG_STOP_COMMANDS);
+                xEventGroupClearBits(g_event_mgr.states, ST_CLIENT_CONNECTED);
                 break;
             case ST_DISCOVERY_ACTIVE:
-                xEventGroupSetBits(mgr->signals, SIG_STOP_DISCOVERY);
-                xEventGroupClearBits(mgr->states, ST_DISCOVERY_ACTIVE);
+                xEventGroupSetBits(g_event_mgr.signals, SIG_STOP_DISCOVERY);
+                xEventGroupClearBits(g_event_mgr.states, ST_DISCOVERY_ACTIVE);
                 break;
             default:
                 break;
         }
         ESP_LOGE(TAG, "Failed to init WiFi");
-        xSemaphoreGive(mgr->mutex);
+        xSemaphoreGive(g_event_mgr.mutex);
         return;
     }
 
-    switch (mgr->curr_state) {
+    switch (g_event_mgr.curr_state) {
         case ST_INITIALIZED:
             if (events & EV_WIFI_GOT_IP) {
-                xEventGroupSetBits(mgr->signals, SIG_START_DISCOVERY);
-                xEventGroupSetBits(mgr->states, ST_WIFI_CONNECTED | ST_DISCOVERY_ACTIVE);
-                mgr->curr_state = ST_DISCOVERY_ACTIVE;
+                xEventGroupSetBits(g_event_mgr.signals, SIG_START_DISCOVERY);
+                xEventGroupSetBits(g_event_mgr.states, ST_WIFI_CONNECTED | ST_DISCOVERY_ACTIVE);
+                g_event_mgr.curr_state = ST_DISCOVERY_ACTIVE;
                 ESP_LOGI(TAG, "WiFi connected, starting discovery");
             }
             break;
         case ST_DISCOVERY_ACTIVE:
             if (events & EV_CLIENT_CONNECTED) {
-                xEventGroupSetBits(mgr->signals, SIG_START_RTP | SIG_START_AUDIO |
+                xEventGroupSetBits(g_event_mgr.signals, SIG_START_RTP | SIG_START_AUDIO |
                                    SIG_START_COMMANDS | SIG_STOP_DISCOVERY);
-                xEventGroupSetBits(mgr->states, ST_CLIENT_CONNECTED);
-                xEventGroupClearBits(mgr->states, ST_DISCOVERY_ACTIVE);
-                mgr->curr_state = ST_CLIENT_CONNECTED;
+                xEventGroupSetBits(g_event_mgr.states, ST_CLIENT_CONNECTED);
+                xEventGroupClearBits(g_event_mgr.states, ST_DISCOVERY_ACTIVE);
+                g_event_mgr.curr_state = ST_CLIENT_CONNECTED;
                 ESP_LOGI(TAG, "WiFi connected, starting discovery");
             }
             if (events & EV_DISCOVERY_INIT_FAILED) {
-                xEventGroupSetBits(mgr->states, ST_FAILED);
-                mgr->curr_state = ST_FAILED;
+                xEventGroupSetBits(g_event_mgr.states, ST_FAILED);
+                g_event_mgr.curr_state = ST_FAILED;
                 ESP_LOGE(TAG, "Discovery init failed, aborting headphones");
-                xEventGroupSetBits(mgr->signals, SIG_RESTART);
+                xEventGroupSetBits(g_event_mgr.signals, SIG_RESTART);
             }
             break;
         case ST_CLIENT_CONNECTED:
             if (events & (EV_CLIENT_LOST_CONNECTION | EV_CLIENT_DISCONNECTED)) {
-                xEventGroupSetBits(mgr->signals, SIG_START_DISCOVERY | SIG_STOP_RTP |
+                xEventGroupSetBits(g_event_mgr.signals, SIG_START_DISCOVERY | SIG_STOP_RTP |
                                    SIG_STOP_AUDIO | SIG_STOP_COMMANDS);
-                xEventGroupClearBits(mgr->states, ST_CLIENT_CONNECTED);
-                xEventGroupSetBits(mgr->states, ST_DISCOVERY_ACTIVE);
-                mgr->curr_state = ST_DISCOVERY_ACTIVE;
+                xEventGroupClearBits(g_event_mgr.states, ST_CLIENT_CONNECTED);
+                xEventGroupSetBits(g_event_mgr.states, ST_DISCOVERY_ACTIVE);
+                g_event_mgr.curr_state = ST_DISCOVERY_ACTIVE;
                 ESP_LOGI(TAG, "Client lost connection (or disconnected)");
             }
             if (events & (EV_RTP_INIT_FAILED | EV_CMDS_SERVER_INIT_FAILED)) {
-                xEventGroupSetBits(mgr->states, ST_FAILED);
-                mgr->curr_state = ST_FAILED;
+                xEventGroupSetBits(g_event_mgr.states, ST_FAILED);
+                g_event_mgr.curr_state = ST_FAILED;
                 ESP_LOGE(TAG, "RTP/Commands init failed, aborting headphones");
-                xEventGroupSetBits(mgr->signals, SIG_RESTART);
+                xEventGroupSetBits(g_event_mgr.signals, SIG_RESTART);
             }
             break;
         default:
             break;
     }
 
-    xSemaphoreGive(mgr->mutex);
+    xSemaphoreGive(g_event_mgr.mutex);
 }
 
 void event_mgr_task(void *arg) {
@@ -130,7 +130,7 @@ void event_mgr_task(void *arg) {
         );
         current_states = xEventGroupGetBits(g_event_mgr.states);
 
-        handle_state_machine(&g_event_mgr, new_events, current_states);
+        handle_state_machine(new_events, current_states);
     }
 
     destroy_event_mgr();

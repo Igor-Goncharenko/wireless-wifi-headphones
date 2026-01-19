@@ -7,6 +7,7 @@
 #include "lwip/sockets.h"
 #include "esp_log.h"
 #include <errno.h>
+#include <inttypes.h>
 #include <stdbool.h>
 #include <string.h>
 #include <time.h>
@@ -60,11 +61,15 @@ static int commands_server_init(void) {
         ESP_LOGW(TAG, "setsockopt SO_RCVTIMEO failed: %s", strerror(errno));
     }
 
-    s_server.expected_sequence = 0;
-    s_server.packets_received = 0;
-    s_server.packets_lost = 0;
-
+    s_server.exp_seq = 0;
+    s_server.pack_recv = 0;
+    s_server.pack_lost = 0;
     s_server.allowed_ip4.s_addr = ipaddr_addr(g_event_mgr.host_ip4);
+
+    s_server.ping.pack_recv = 0;
+    s_server.ping.pack_lost = 0;
+    s_server.ping.exp_seq = 0;
+    s_server.ping.last_ts = (uint32_t)time(NULL);
 
     ESP_LOGI(TAG, "Commands server initialized: sockfd=%d, port=%d", s_server.sockfd,
              HEADPHONES_CMD_PORT);
@@ -82,18 +87,46 @@ static void commands_server_destroy() {
     ESP_LOGI(TAG, "Commands server destroyed");
 }
 
-static void process_command(headphones_packet_t command) {
-    switch (command.command) {
+static void process_command(headphones_packet_t *command_ptr) {
+    switch (command_ptr->command) {
         case HPCMD_NO_COMMAND:
             break;
         case HPCMD_PING:
+            s_server.ping.last_ts = (uint32_t)time(NULL);
             break;
         case HPCMD_DISCONNECT:
             xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_DISCONNECTED);
             break;
         default:
-            ESP_LOGW(TAG, "Unprocessed headphones command 0x%02x", command.command);
+            ESP_LOGW(TAG, "Unprocessed headphones command 0x%02x", command_ptr->command);
             break;
+    }
+}
+
+static void update_server_stats(headphones_packet_t *command_ptr) {
+    if (command_ptr->command == HPCMD_PING) {   // ping has a separate counter
+        if (command_ptr->sequence > s_server.ping.exp_seq) {
+            s_server.ping.pack_lost += (command_ptr->sequence - s_server.ping.exp_seq);
+        }
+        s_server.ping.exp_seq = command_ptr->sequence + 1;
+        s_server.ping.pack_recv++;
+
+        if (s_server.ping.pack_recv % 10 == 0) {
+            ESP_LOGI(TAG, "PING received=%" PRIu32 "; lost=%" PRIu32,
+                     s_server.ping.pack_recv, s_server.ping.pack_lost);
+        }
+    } else {                                // count other commands
+        if (command_ptr->sequence > s_server.exp_seq) {
+            s_server.pack_lost += (command_ptr->sequence - s_server.exp_seq);
+        }
+        s_server.exp_seq = command_ptr->sequence + 1;
+        s_server.pack_recv++;
+
+        ESP_LOGI(TAG, "Received command: 0x%02x", command_ptr->command);
+        if (s_server.pack_recv % 10 == 0) {
+            ESP_LOGI(TAG, "Commands received=%" PRIu32 "; lost=%" PRIu32,
+                     s_server.pack_recv, s_server.pack_lost);
+        }
     }
 }
 
@@ -141,8 +174,8 @@ static void commands_receiver_task(void *arg) {
             .timestamp = ntohl(packet.timestamp),
         };
 
-        ESP_LOGI(TAG, "Received command: 0x%02x", command.command);
-        process_command(command);
+        process_command(&command);
+        update_server_stats(&command);
     }
 
     ESP_LOGI(TAG, "Commands receiver task stopped");
@@ -168,8 +201,6 @@ static void commands_sender_task(void *arg) {
                                 (struct sockaddr *)&client_addr, client_len);
             if (bytes_sent < 0) {
                 ESP_LOGE(TAG, "Failed to send 0x%02x command: %s", cmd.command, strerror(errno));
-            } else {
-                // ESP_LOGI(TAG, "Send command: 0x%02x", cmd.command);
             }
         }
     }
@@ -179,14 +210,23 @@ static void commands_sender_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-static void ping_sender_timer_cb(TimerHandle_t xTimer) {
+static void ping_timer_cb(TimerHandle_t xTimer) {
+    // send ping command to queue
     headphones_packet_t command = {
         .command = HPCMD_PING,
-        .sequence = htons(s_server.ping_seq++),
+        .sequence = htons(s_server.ping.send_seq++),
         .timestamp = htonl((uint32_t)time(NULL)),
     };
     if (xQueueSend(s_cmds_queue_hndl, &command, pdMS_TO_TICKS(50)) != pdTRUE) {
         ESP_LOGW(TAG, "Failed to send ping command to queue");
+    }
+
+    // check last received ping
+    uint32_t now = (uint32_t)time(NULL);
+    if (now - s_server.ping.last_ts > PING_TIMEOUT_S) {
+        xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_LOST_CONNECTION);
+        xTimerStop(s_ping_timer, 100);
+        ESP_LOGW(TAG, "Lost connection (ping timeout)");
     }
 }
 
@@ -205,7 +245,7 @@ static void commands_server_start(void) {
         pdMS_TO_TICKS(PING_INTERVAL_MS),
         pdTRUE,
         (void*)1,
-        ping_sender_timer_cb
+        ping_timer_cb
     );
     if (s_ping_timer == NULL || xTimerStart(s_ping_timer, 0) != pdPASS) {
         ESP_LOGE(TAG, "Failed to init ping timer");
@@ -241,7 +281,7 @@ int push_command(uint8_t command_type) {
     headphones_packet_t new_command = {
         .command = command_type,
         .timestamp = (uint32_t)time(NULL),
-        .sequence = (s_server.sender_seq++),
+        .sequence = (s_server.send_seq++),
     };
     if (xQueueSend(s_cmds_queue_hndl, &new_command, pdMS_TO_TICKS(10))) {
         return 0;

@@ -1,6 +1,7 @@
 #include "headphones_commands.h"
 
 #include <errno.h>
+#include <inttypes.h>
 #include <pthread.h>
 #include <stdbool.h>
 #include <string.h>
@@ -89,9 +90,11 @@ static bool hpcmd_queue_pop(hpcmd_session_t *session, headphones_packet_t *dest)
 
 static int hpcmd_ping_data_init(hpcmd_ping_data_t *data) {
     memset(data, 0, sizeof(hpcmd_ping_data_t));
-    data->send_sequence = 0;
-    data->recv_sequence = 0;
-    data->recv_timestamp = 0;
+    data->pack_lost = 0;
+    data->pack_recv = 0;
+    data->exp_seq = 0;
+    data->send_seq = 0;
+    data->last_ts = (uint32_t)time(NULL);
     return 0;
 }
 
@@ -130,8 +133,10 @@ static int hpcmd_session_create(hpcmd_session_t *session, const char ipv4[16], c
     session->remote_addr.sin_port = htons(port);
     session->remote_addr.sin_addr.s_addr = inet_addr(ipv4);
 
-    session->sequence = 0;
-    session->timestamp = 0;
+    session->pack_lost = 0;
+    session->pack_recv = 0;
+    session->exp_seq = 0;
+    session->send_seq = 0;
 
     if (hpcmd_queue_init(&session->queue) != 0) {
         syslog(LOG_ERR, "HPCMD failed to init session queue");
@@ -155,11 +160,6 @@ static void hpcmd_session_destroy(hpcmd_session_t *session) {
         close(session->sockfd);
         session->sockfd = -1;
     }
-    session->sequence = 0;
-    session->timestamp = 0;
-    memset(&session->addr, 0, sizeof(struct sockaddr_in));
-    memset(&session->remote_addr, 0, sizeof(struct sockaddr_in));
-    memset(&session->ping, 0, sizeof(session->ping));
     hpcmd_queue_destroy(&session->queue);
 }
 
@@ -168,6 +168,7 @@ static void process_command(hpcmd_conn_data_t *conn, headphones_packet_t command
         case HPCMD_NO_COMMAND:
             break;
         case HPCMD_PING:
+            conn->session.ping.last_ts = (uint32_t)time(NULL);
             break;
         case HPCMD_DISCONNECT:
             rtp_connection_stop(conn->rtp_conn_ptr);
@@ -177,6 +178,33 @@ static void process_command(hpcmd_conn_data_t *conn, headphones_packet_t command
         default:
             syslog(LOG_WARNING, "Unprocessed headphones command 0x%02x", command.command);
             break;
+    }
+}
+
+static void update_session_stats(hpcmd_session_t *session, headphones_packet_t *command_ptr) {
+    if (command_ptr->command == HPCMD_PING) {   // ping has a separate counter
+        if (command_ptr->sequence > session->ping.exp_seq) {
+            session->ping.pack_lost += (command_ptr->sequence - session->ping.exp_seq);
+        }
+        session->ping.exp_seq = command_ptr->sequence + 1;
+        session->ping.pack_recv++;
+
+        if (session->ping.pack_recv % 10 == 0) {
+            syslog(LOG_INFO, "PING received=%" PRIu32 "; lost=%" PRIu32,
+                   session->ping.pack_recv, session->ping.pack_lost);
+        }
+    } else {                                // count other commands
+        if (command_ptr->sequence > session->exp_seq) {
+            session->pack_lost += (command_ptr->sequence - session->exp_seq);
+        }
+        session->exp_seq = command_ptr->sequence + 1;
+        session->pack_recv++;
+
+        syslog(LOG_INFO, "HPCMD received command 0x%02x", command_ptr->command);
+        if (session->pack_recv % 10 == 0) {
+            syslog(LOG_INFO, "PING received=%" PRIu32 "; lost=%" PRIu32,
+                   session->pack_recv, session->pack_lost);
+        }
     }
 }
 
@@ -224,8 +252,8 @@ static void *hpcmd_receiver_task(void *arg) {
             .timestamp = ntohl(packet.timestamp),
         };
 
-        syslog(LOG_INFO, "HPCMD received command 0x%02x", command.command);
         process_command(conn, command);
+        update_session_stats(&conn->session, &command);
     }
 
     return NULL;
@@ -263,8 +291,6 @@ static void *hpcmd_sender_task(void *arg) {
             usleep(RECV_ERR_DELAY_US);
             continue;
         }
-
-        // syslog(LOG_INFO, "HPCMD sent command 0x%02x", packet.command);
     }
 
     return NULL;
@@ -276,11 +302,18 @@ static void *hpcmd_ping_task(void *arg) {
     while (conn->is_running) {
         headphones_packet_t command = {
             .command = HPCMD_PING,
-            .sequence = htons(conn->session.ping.send_sequence++),
+            .sequence = htons(conn->session.ping.send_seq++),
             .timestamp = htonl((uint32_t)time(NULL)),
         };
         hpcmd_queue_push(&conn->session, &command);
         usleep(PING_INTERVAL_MS * 1000);
+
+        uint32_t now = (uint32_t)time(NULL);
+        if (now - conn->session.ping.last_ts > PING_TIMEOUT_S) {
+            rtp_connection_stop(conn->rtp_conn_ptr);
+            hpcmd_conn_stop(conn);  // FIXME: thread stops itself
+            syslog(LOG_INFO, "HPCMD lost connection (ping timeout)");
+        }
     }
 
     return NULL;
@@ -380,7 +413,7 @@ void hpcmd_conn_data_destroy(hpcmd_conn_data_t *data) {
 int hpcmd_send_command(hpcmd_session_t *session, uint8_t command_type) {
     headphones_packet_t command = {
         .command = command_type,
-        .sequence = htons(session->sequence++),
+        .sequence = htons(session->send_seq++),
         .timestamp = htonl((uint32_t)time(NULL)),
     };
     return hpcmd_queue_push(session, &command);

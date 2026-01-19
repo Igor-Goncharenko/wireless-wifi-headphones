@@ -22,10 +22,13 @@ typedef struct {
 } hpcmd_queue_t;
 
 typedef struct {
-    uint16_t send_sequence;
+    uint32_t pack_recv;
+    uint32_t pack_lost;
 
-    uint16_t recv_sequence;
-    uint32_t recv_timestamp;
+    uint16_t exp_seq;
+    uint16_t send_seq;
+
+    uint32_t last_ts;
 } hpcmd_ping_data_t;
 
 typedef struct {
@@ -36,8 +39,11 @@ typedef struct {
     hpcmd_queue_t queue;
     hpcmd_ping_data_t ping;
 
-    uint16_t sequence;
-    uint32_t timestamp;
+    uint32_t pack_recv;
+    uint32_t pack_lost;
+
+    uint16_t exp_seq;
+    uint16_t send_seq;
 } hpcmd_session_t;
 
 typedef struct {

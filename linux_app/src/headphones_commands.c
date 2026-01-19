@@ -120,6 +120,12 @@ static int hpcmd_session_create(hpcmd_session_t *session, const char ipv4[16], c
     session->addr.sin_port = htons(port);
     session->addr.sin_addr.s_addr = htonl(INADDR_ANY);
 
+    if (bind(session->sockfd, (struct sockaddr *)&session->addr, sizeof(session->addr)) < 0) {
+        syslog(LOG_ERR, "HPCMD server bind failed: %s", strerror(errno));
+        close(session->sockfd);
+        return -1;
+    }
+
     session->remote_addr.sin_family = AF_INET;
     session->remote_addr.sin_port = htons(port);
     session->remote_addr.sin_addr.s_addr = inet_addr(ipv4);
@@ -218,7 +224,7 @@ static void *hpcmd_receiver_task(void *arg) {
             .timestamp = ntohl(packet.timestamp),
         };
 
-        syslog(LOG_INFO, "HPCMD received command %02x", command.command);
+        syslog(LOG_INFO, "HPCMD received command 0x%02x", command.command);
         process_command(conn, command);
     }
 
@@ -258,7 +264,7 @@ static void *hpcmd_sender_task(void *arg) {
             continue;
         }
 
-        syslog(LOG_INFO, "HPCMD sent command %02x", packet.command);
+        // syslog(LOG_INFO, "HPCMD sent command 0x%02x", packet.command);
     }
 
     return NULL;

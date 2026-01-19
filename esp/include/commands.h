@@ -12,7 +12,8 @@ typedef struct {
     uint32_t packets_received;
     uint32_t packets_lost;
 
-    uint32_t sender_seq;
+    uint16_t sender_seq;
+    uint16_t ping_seq;
 
     struct in_addr allowed_ip4;
 } commands_server_t;

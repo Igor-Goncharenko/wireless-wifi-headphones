@@ -2,6 +2,7 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/timers.h"
 #include "freertos/queue.h"
 #include "lwip/sockets.h"
 #include "esp_log.h"
@@ -25,6 +26,7 @@ static bool s_running = false;
 static TaskHandle_t s_cmds_recv_hndl = NULL;
 static TaskHandle_t s_cmds_send_hndl = NULL;
 static QueueHandle_t s_cmds_queue_hndl = NULL;
+static TimerHandle_t s_ping_timer = NULL;
 
 static int commands_server_init(void) {
     memset(&s_server, 0, sizeof(commands_server_t));
@@ -151,12 +153,12 @@ static void commands_receiver_task(void *arg) {
 static void commands_sender_task(void *arg) {
     headphones_packet_t cmd;
     ssize_t bytes_sent;
-    struct sockaddr_in client_addr;
+    struct sockaddr_in client_addr = {
+        .sin_family = AF_INET,
+        .sin_port = htons(HEADPHONES_CMD_PORT),
+        .sin_addr.s_addr = s_server.allowed_ip4.s_addr,
+    };
     socklen_t client_len = sizeof(client_addr);
-
-    client_addr.sin_family = AF_INET;
-    memcpy(&client_addr.sin_addr, &s_server.allowed_ip4, sizeof(struct in_addr));
-    client_addr.sin_port = htons(HEADPHONES_CMD_PORT);
 
     ESP_LOGI(TAG, "Commands sender task started");
 
@@ -165,9 +167,9 @@ static void commands_sender_task(void *arg) {
             bytes_sent = sendto(s_server.sockfd, &cmd, sizeof(headphones_packet_t), 0,
                                 (struct sockaddr *)&client_addr, client_len);
             if (bytes_sent < 0) {
-                ESP_LOGE(TAG, "Failed to send %02x command: %s", cmd.command, strerror(errno));
+                ESP_LOGE(TAG, "Failed to send 0x%02x command: %s", cmd.command, strerror(errno));
             } else {
-                ESP_LOGI(TAG, "Send command: %02x", cmd.command);
+                // ESP_LOGI(TAG, "Send command: 0x%02x", cmd.command);
             }
         }
     }
@@ -175,6 +177,17 @@ static void commands_sender_task(void *arg) {
     ESP_LOGI(TAG, "Commands sender task stopped");
     s_cmds_recv_hndl = NULL;
     vTaskDelete(NULL);
+}
+
+static void ping_sender_timer_cb(TimerHandle_t xTimer) {
+    headphones_packet_t command = {
+        .command = HPCMD_PING,
+        .sequence = htons(s_server.ping_seq++),
+        .timestamp = htonl((uint32_t)time(NULL)),
+    };
+    if (xQueueSend(s_cmds_queue_hndl, &command, pdMS_TO_TICKS(50)) != pdTRUE) {
+        ESP_LOGW(TAG, "Failed to send ping command to queue");
+    }
 }
 
 static void commands_server_start(void) {
@@ -186,6 +199,20 @@ static void commands_server_start(void) {
     s_running = true;
     xTaskCreate(commands_receiver_task, "commands_receiver_task", 4096, NULL, 5, &s_cmds_recv_hndl);
     xTaskCreate(commands_sender_task, "commands_sender_task", 4096, NULL, 5, &s_cmds_recv_hndl);
+
+    s_ping_timer = xTimerCreate(
+        "PeriodicTimer",
+        pdMS_TO_TICKS(PING_INTERVAL_MS),
+        pdTRUE,
+        (void*)1,
+        ping_sender_timer_cb
+    );
+    if (s_ping_timer == NULL || xTimerStart(s_ping_timer, 0) != pdPASS) {
+        ESP_LOGE(TAG, "Failed to init ping timer");
+        xEventGroupSetBits(g_event_mgr.events, EV_CMDS_SERVER_INIT_FAILED);
+        return;
+    }
+
 }
 
 static void commands_server_stop(void) {
@@ -202,6 +229,12 @@ static void commands_server_stop(void) {
         ESP_LOGW(TAG, "Command sender task did not stop properly, forcing stop");
     }
     commands_server_destroy();
+
+    if (s_ping_timer != NULL) {
+        xTimerStop(s_ping_timer, 100);
+        xTimerDelete(s_ping_timer, 100);
+        s_ping_timer = NULL;
+    }
 }
 
 int push_command(uint8_t command_type) {

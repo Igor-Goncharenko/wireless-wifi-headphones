@@ -31,6 +31,5 @@
 #define HEADPHONES_CMD_PORT 12345
 #define PING_INTERVAL_MS 1000
 #define PING_TIMEOUT_S 5
-#define PING_RETRY_COUNT 3
 
 #endif /* CONFIG_H */

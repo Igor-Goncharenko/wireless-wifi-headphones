@@ -2,6 +2,7 @@
 #define HEADPHONES_COMMANDS_H
 
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <stdint.h>
 #include <arpa/inet.h>
@@ -47,13 +48,13 @@ typedef struct {
 } hpcmd_session_t;
 
 typedef struct {
+    pthread_mutex_t mutex;
+    atomic_bool is_running;
     bool has_active_session;
-    volatile bool is_running;
 
     pthread_t ping_tid;
     pthread_t sender_tid;
     pthread_t receiver_tid;
-    pthread_mutex_t mutex;
 
     hpcmd_session_t session;
     rtp_connection_data_t *rtp_conn_ptr;    // used to disconnect client

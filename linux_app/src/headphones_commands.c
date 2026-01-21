@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <inttypes.h>
 #include <pthread.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <string.h>
 #include <syslog.h>
@@ -27,7 +28,7 @@ static int hpcmd_queue_init(hpcmd_queue_t *q) {
         return -1;
     }
     if (pthread_cond_init(&q->new_item_cond, NULL) != 0) {
-        syslog(LOG_ERR, "HPCMD failed to init session queue mutex");
+        syslog(LOG_ERR, "HPCMD failed to init session queue condvar");
         pthread_mutex_destroy(&q->mutex);
         return -1;
     }
@@ -88,6 +89,13 @@ static bool hpcmd_queue_pop(hpcmd_session_t *session, headphones_packet_t *dest)
     return true;
 }
 
+static bool hpcmd_queue_is_empty(hpcmd_session_t *session) {
+    pthread_mutex_lock(&session->queue.mutex);
+    const bool is_empty = session->queue.len == 0;
+    pthread_mutex_unlock(&session->queue.mutex);
+    return is_empty;
+}
+
 static int hpcmd_ping_data_init(hpcmd_ping_data_t *data) {
     memset(data, 0, sizeof(hpcmd_ping_data_t));
     data->pack_lost = 0;
@@ -112,7 +120,7 @@ static int hpcmd_session_create(hpcmd_session_t *session, const char ipv4[16], c
 
     struct timeval tv = {
         .tv_sec = HPCMD_SOCK_TIMEOUT_MS / 1000,
-        .tv_usec = HPCMD_SOCK_TIMEOUT_MS % 1000,
+        .tv_usec = (HPCMD_SOCK_TIMEOUT_MS % 1000) * 1000,
     };
     if (setsockopt(session->sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
         syslog(LOG_WARNING, "setsockopt SO_RCVTIMEO failed: %s", strerror(errno));
@@ -190,7 +198,7 @@ static void update_session_stats(hpcmd_session_t *session, headphones_packet_t *
         session->ping.pack_recv++;
 
         if (session->ping.pack_recv % 10 == 0) {
-            syslog(LOG_INFO, "PING received=%" PRIu32 "; lost=%" PRIu32,
+            syslog(LOG_INFO, "HPCMD PING received=%" PRIu32 "; lost=%" PRIu32,
                    session->ping.pack_recv, session->ping.pack_lost);
         }
     } else {                                // count other commands
@@ -202,7 +210,7 @@ static void update_session_stats(hpcmd_session_t *session, headphones_packet_t *
 
         syslog(LOG_INFO, "HPCMD received command 0x%02x", command_ptr->command);
         if (session->pack_recv % 10 == 0) {
-            syslog(LOG_INFO, "PING received=%" PRIu32 "; lost=%" PRIu32,
+            syslog(LOG_INFO, "HPCMD COMMANDS received=%" PRIu32 "; lost=%" PRIu32,
                    session->pack_recv, session->pack_lost);
         }
     }
@@ -215,7 +223,7 @@ static void *hpcmd_receiver_task(void *arg) {
     headphones_packet_t packet;
     ssize_t recv_len;
 
-    while (conn->is_running) {
+    while (atomic_load(&conn->is_running)) {
         recv_len = recvfrom(conn->session.sockfd, &packet, sizeof(headphones_packet_t), 0,
                             (struct sockaddr *)&client_addr, &client_len);
 
@@ -264,7 +272,7 @@ static void *hpcmd_sender_task(void *arg) {
     headphones_packet_t packet;
     ssize_t sent_size;
 
-    while (conn->is_running || conn->session.queue.len > 0) {
+    while (atomic_load(&conn->is_running) || !hpcmd_queue_is_empty(&conn->session)) {
         if (!hpcmd_queue_pop(&conn->session, &packet)) {
             continue;
         }
@@ -299,7 +307,7 @@ static void *hpcmd_sender_task(void *arg) {
 static void *hpcmd_ping_task(void *arg) {
     hpcmd_conn_data_t *conn = (hpcmd_conn_data_t *)arg;
 
-    while (conn->is_running) {
+    while (atomic_load(&conn->is_running)) {
         headphones_packet_t command = {
             .command = HPCMD_PING,
             .sequence = htons(conn->session.ping.send_seq++),
@@ -320,9 +328,7 @@ static void *hpcmd_ping_task(void *arg) {
 }
 
 void hpcmd_conn_stop(hpcmd_conn_data_t *data) {
-    pthread_mutex_lock(&data->mutex);
-    data->is_running = false;
-    pthread_mutex_unlock(&data->mutex);
+    atomic_store(&data->is_running, false);
 
     if (data->receiver_tid > 0) {
         pthread_join(data->receiver_tid, NULL);
@@ -354,7 +360,7 @@ int hpcmd_conn_start(hpcmd_conn_data_t *data, const char ipv4[16]) {
         return -1;
     }
 
-    data->is_running = true;
+    atomic_store(&data->is_running, true);
 
     if (hpcmd_session_create(&data->session, ipv4, HEADPHONES_CMD_PORT) != 0) {
         syslog(LOG_ERR, "Failed to create HPCMD session");
@@ -395,10 +401,11 @@ int hpcmd_conn_data_init(hpcmd_conn_data_t *data, rtp_connection_data_t *rtp_con
         return -1;
     }
 
+    atomic_store(&data->is_running, false);
     data->has_active_session = false;
-    data->is_running = false;
     data->receiver_tid = 0;
     data->sender_tid = 0;
+    data->ping_tid = 0;
 
     data->rtp_conn_ptr = rtp_conn_ptr;
 

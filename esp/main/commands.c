@@ -2,12 +2,12 @@
 
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "freertos/timers.h"
 #include "freertos/queue.h"
 #include "lwip/sockets.h"
 #include "esp_log.h"
 #include <errno.h>
 #include <inttypes.h>
+#include <stdatomic.h>
 #include <stdbool.h>
 #include <string.h>
 #include <time.h>
@@ -23,14 +23,19 @@
 
 static const char *TAG = "WHP " __FILE__;
 static commands_server_t s_server = { 0 };
-static bool s_running = false;
+static ping_data_t ping = { 0 };
+static atomic_bool s_running = ATOMIC_VAR_INIT(false);;
 static TaskHandle_t s_cmds_recv_hndl = NULL;
 static TaskHandle_t s_cmds_send_hndl = NULL;
+static TaskHandle_t s_cmds_ping_hndl = NULL;
 static QueueHandle_t s_cmds_queue_hndl = NULL;
-static TimerHandle_t s_ping_timer = NULL;
 
 static int commands_server_init(void) {
-    memset(&s_server, 0, sizeof(commands_server_t));
+    s_server.mutex = xSemaphoreCreateMutex();
+    if (s_server.mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to init server mutex");
+        return -1;
+    }
 
     if ((s_server.sockfd = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP)) < 0) {
         ESP_LOGE(TAG, "Commands server failed to create socket: %s", strerror(errno));
@@ -55,36 +60,49 @@ static int commands_server_init(void) {
 
     struct timeval tv = {
         .tv_sec = COMMANDS_SOCK_TIMEOUT_MS / 1000,
-        .tv_usec = COMMANDS_SOCK_TIMEOUT_MS % 1000,
+        .tv_usec = (COMMANDS_SOCK_TIMEOUT_MS % 1000) * 1000,
     };
     if (setsockopt(s_server.sockfd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv)) < 0) {
         ESP_LOGW(TAG, "setsockopt SO_RCVTIMEO failed: %s", strerror(errno));
     }
 
-    s_server.exp_seq = 0;
     s_server.pack_recv = 0;
     s_server.pack_lost = 0;
+    s_server.exp_seq = 0;
+    s_server.send_seq = 0;
     s_server.allowed_ip4.s_addr = ipaddr_addr(g_event_mgr.host_ip4);
-
-    s_server.ping.pack_recv = 0;
-    s_server.ping.pack_lost = 0;
-    s_server.ping.exp_seq = 0;
-    s_server.ping.last_ts = (uint32_t)time(NULL);
 
     ESP_LOGI(TAG, "Commands server initialized: sockfd=%d, port=%d", s_server.sockfd,
              HEADPHONES_CMD_PORT);
     return 0;
 }
 
-static void commands_server_destroy() {
+static void commands_server_destroy(void) {
     if (s_server.sockfd > 0) {
         shutdown(s_server.sockfd, SHUT_RDWR);
         vTaskDelay(pdMS_TO_TICKS(100));
         close(s_server.sockfd);
     }
-
-    memset(&s_server, 0, sizeof(commands_server_t));
+    vSemaphoreDelete(s_server.mutex);
     ESP_LOGI(TAG, "Commands server destroyed");
+}
+
+static int ping_data_init(void) {
+    ping.mutex = xSemaphoreCreateMutex();
+    if (ping.mutex == NULL) {
+        ESP_LOGE(TAG, "Failed to init ping data mutex");
+        return -1;
+    }
+    ping.pack_recv = 0;
+    ping.pack_lost = 0;
+    ping.exp_seq = 0;
+    ping.send_seq = 0;
+    ping.last_ts = (uint32_t)time(NULL);
+    return 0;
+}
+
+static void ping_data_destroy(void) {
+    vSemaphoreDelete(ping.mutex);
 }
 
 static void process_command(headphones_packet_t *command_ptr) {
@@ -92,7 +110,12 @@ static void process_command(headphones_packet_t *command_ptr) {
         case HPCMD_NO_COMMAND:
             break;
         case HPCMD_PING:
-            s_server.ping.last_ts = (uint32_t)time(NULL);
+            if (xSemaphoreTake(ping.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+                ping.last_ts = (uint32_t)time(NULL);
+                xSemaphoreGive(ping.mutex);
+            } else {
+                ESP_LOGW(TAG, "Failed to take ping mutex");
+            }
             break;
         case HPCMD_DISCONNECT:
             xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_DISCONNECTED);
@@ -105,17 +128,29 @@ static void process_command(headphones_packet_t *command_ptr) {
 
 static void update_server_stats(headphones_packet_t *command_ptr) {
     if (command_ptr->command == HPCMD_PING) {   // ping has a separate counter
-        if (command_ptr->sequence > s_server.ping.exp_seq) {
-            s_server.ping.pack_lost += (command_ptr->sequence - s_server.ping.exp_seq);
+        if (xSemaphoreTake(ping.mutex, pdMS_TO_TICKS(100)) == pdFALSE) {
+            ESP_LOGW(TAG, "Failed to take ping mutex");
+            return;
         }
-        s_server.ping.exp_seq = command_ptr->sequence + 1;
-        s_server.ping.pack_recv++;
 
-        if (s_server.ping.pack_recv % 10 == 0) {
-            ESP_LOGI(TAG, "PING received=%" PRIu32 "; lost=%" PRIu32,
-                     s_server.ping.pack_recv, s_server.ping.pack_lost);
+        if (command_ptr->sequence > ping.exp_seq) {
+            ping.pack_lost += (command_ptr->sequence - ping.exp_seq);
         }
+        ping.exp_seq = command_ptr->sequence + 1;
+        ping.pack_recv++;
+
+        if (ping.pack_recv % 10 == 0) {
+            ESP_LOGI(TAG, "PING received=%" PRIu32 "; lost=%" PRIu32,
+                     ping.pack_recv, ping.pack_lost);
+        }
+
+        xSemaphoreGive(ping.mutex);
     } else {                                // count other commands
+        if (xSemaphoreTake(s_server.mutex, pdMS_TO_TICKS(100)) == pdFALSE) {
+            ESP_LOGW(TAG, "Failed to take s_server mutex");
+            return;
+        }
+
         if (command_ptr->sequence > s_server.exp_seq) {
             s_server.pack_lost += (command_ptr->sequence - s_server.exp_seq);
         }
@@ -127,6 +162,8 @@ static void update_server_stats(headphones_packet_t *command_ptr) {
             ESP_LOGI(TAG, "Commands received=%" PRIu32 "; lost=%" PRIu32,
                      s_server.pack_recv, s_server.pack_lost);
         }
+
+        xSemaphoreGive(s_server.mutex);
     }
 }
 
@@ -138,7 +175,7 @@ static void commands_receiver_task(void *arg) {
 
     ESP_LOGI(TAG, "Commands receiver task started");
 
-    while (s_running) {
+    while (atomic_load(&s_running)) {
         recv_len = recvfrom(s_server.sockfd, &packet, sizeof(headphones_packet_t), 0,
                             (struct sockaddr *)&client_addr, &client_len);
 
@@ -157,7 +194,7 @@ static void commands_receiver_task(void *arg) {
         }
 
         if (client_addr.sin_addr.s_addr != s_server.allowed_ip4.s_addr) {
-            ESP_LOGW(TAG, "Rejected packet from: %s:%d, size: %d", inet_ntoa(client_addr.sin_addr),
+            ESP_LOGW(TAG, "Rejected packet from: %s:%d, size: %zd", inet_ntoa(client_addr.sin_addr),
                      ntohs(client_addr.sin_port), recv_len);
             continue;
         }
@@ -195,8 +232,8 @@ static void commands_sender_task(void *arg) {
 
     ESP_LOGI(TAG, "Commands sender task started");
 
-    while (s_running) {
-        if (xQueueReceive(s_cmds_queue_hndl, &cmd, pdMS_TO_TICKS(1000))) {
+    while (atomic_load(&s_running)) {
+        if (xQueueReceive(s_cmds_queue_hndl, &cmd, pdMS_TO_TICKS(100))) {
             bytes_sent = sendto(s_server.sockfd, &cmd, sizeof(headphones_packet_t), 0,
                                 (struct sockaddr *)&client_addr, client_len);
             if (bytes_sent < 0) {
@@ -206,57 +243,58 @@ static void commands_sender_task(void *arg) {
     }
 
     ESP_LOGI(TAG, "Commands sender task stopped");
-    s_cmds_recv_hndl = NULL;
+    s_cmds_send_hndl = NULL;
     vTaskDelete(NULL);
 }
 
-static void ping_timer_cb(TimerHandle_t xTimer) {
-    // send ping command to queue
-    headphones_packet_t command = {
-        .command = HPCMD_PING,
-        .sequence = htons(s_server.ping.send_seq++),
-        .timestamp = htonl((uint32_t)time(NULL)),
-    };
-    if (xQueueSend(s_cmds_queue_hndl, &command, pdMS_TO_TICKS(50)) != pdTRUE) {
-        ESP_LOGW(TAG, "Failed to send ping command to queue");
+static void ping_task(void *arg) {
+    while (atomic_load(&s_running)) {
+        if (xSemaphoreTake(ping.mutex, pdMS_TO_TICKS(100)) == pdFALSE) {
+            ESP_LOGW(TAG, "Failed to take ping mutex");
+            continue;
+        }
+
+        headphones_packet_t command = {
+            .command = HPCMD_PING,
+            .sequence = htons(ping.send_seq++),
+            .timestamp = htonl((uint32_t)time(NULL)),
+        };
+        // check last received ping
+        uint32_t now = (uint32_t)time(NULL);
+        if (now - ping.last_ts > PING_TIMEOUT_S) {
+            xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_LOST_CONNECTION);
+            ESP_LOGW(TAG, "Lost connection (ping timeout)");
+        }
+
+        xSemaphoreGive(ping.mutex);
+
+        // do this after mutex unlocked
+        if (xQueueSend(s_cmds_queue_hndl, &command, pdMS_TO_TICKS(50)) != pdTRUE) {
+            ESP_LOGW(TAG, "Failed to send ping command to queue");
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(PING_INTERVAL_MS));
     }
 
-    // check last received ping
-    uint32_t now = (uint32_t)time(NULL);
-    if (now - s_server.ping.last_ts > PING_TIMEOUT_S) {
-        xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_LOST_CONNECTION);
-        xTimerStop(s_ping_timer, 100);
-        ESP_LOGW(TAG, "Lost connection (ping timeout)");
-    }
+    ESP_LOGI(TAG, "Ping task stopped");
+    s_cmds_ping_hndl = NULL;
+    vTaskDelete(NULL);
 }
 
 static void commands_server_start(void) {
-    if (commands_server_init() != 0) {
+    if (commands_server_init() != 0 || ping_data_init() != 0) {
         ESP_LOGE(TAG, "Failed to init commands server");
         xEventGroupSetBits(g_event_mgr.events, EV_CMDS_SERVER_INIT_FAILED);
         return;
     }
-    s_running = true;
+    atomic_store(&s_running, true);
     xTaskCreate(commands_receiver_task, "commands_receiver_task", 4096, NULL, 5, &s_cmds_recv_hndl);
-    xTaskCreate(commands_sender_task, "commands_sender_task", 4096, NULL, 5, &s_cmds_recv_hndl);
-
-    s_ping_timer = xTimerCreate(
-        "PeriodicTimer",
-        pdMS_TO_TICKS(PING_INTERVAL_MS),
-        pdTRUE,
-        (void*)1,
-        ping_timer_cb
-    );
-    if (s_ping_timer == NULL || xTimerStart(s_ping_timer, 0) != pdPASS) {
-        ESP_LOGE(TAG, "Failed to init ping timer");
-        xEventGroupSetBits(g_event_mgr.events, EV_CMDS_SERVER_INIT_FAILED);
-        return;
-    }
-
+    xTaskCreate(commands_sender_task, "commands_sender_task", 4096, NULL, 5, &s_cmds_send_hndl);
+    xTaskCreate(ping_task, "ping_task", 4096, NULL, 5, &s_cmds_ping_hndl);
 }
 
 static void commands_server_stop(void) {
-    s_running = false;
+    atomic_store(&s_running, false);
     vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
     if (s_cmds_recv_hndl != NULL) {
         vTaskDelete(s_cmds_recv_hndl);
@@ -268,21 +306,29 @@ static void commands_server_stop(void) {
         s_cmds_send_hndl = NULL;
         ESP_LOGW(TAG, "Command sender task did not stop properly, forcing stop");
     }
-    commands_server_destroy();
-
-    if (s_ping_timer != NULL) {
-        xTimerStop(s_ping_timer, 100);
-        xTimerDelete(s_ping_timer, 100);
-        s_ping_timer = NULL;
+    if (s_cmds_ping_hndl != NULL) {
+        vTaskDelete(s_cmds_ping_hndl);
+        s_cmds_ping_hndl = NULL;
+        ESP_LOGW(TAG, "Ping task did not stop properly, forcing stop");
     }
+    commands_server_destroy();
+    ping_data_destroy();
 }
 
 int push_command(uint8_t command_type) {
+    if (xSemaphoreTake(s_server.mutex, pdMS_TO_TICKS(100)) == pdFALSE) {
+        ESP_LOGW(TAG, "Failed to take server mutex");
+        return -1;
+    }
+
     headphones_packet_t new_command = {
         .command = command_type,
-        .timestamp = (uint32_t)time(NULL),
-        .sequence = (s_server.send_seq++),
+        .timestamp = htonl((uint32_t)time(NULL)),
+        .sequence = htons(s_server.send_seq++),
     };
+
+    xSemaphoreGive(s_server.mutex);
+
     if (xQueueSend(s_cmds_queue_hndl, &new_command, pdMS_TO_TICKS(10))) {
         return 0;
     } else {
@@ -323,7 +369,7 @@ void commands_server_mgr_task(void *arg) {
 }
 
 void clear_commands_sock_before_restart(void) {
-    if (s_running) {
+    if (atomic_load(&s_running)) {
         commands_server_stop();
     } else {
         // if the commands_server_stop has not yet ended

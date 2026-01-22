@@ -9,6 +9,7 @@
 #include <syslog.h>
 #include <time.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 #include <sys/socket.h>
 
 #include "config.h"
@@ -102,7 +103,11 @@ static int hpcmd_ping_data_init(hpcmd_ping_data_t *data) {
     data->pack_recv = 0;
     data->exp_seq = 0;
     data->send_seq = 0;
-    data->last_ts = (uint32_t)time(NULL);
+
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    data->last_ts = (uint32_t)ts.tv_sec;
+
     return 0;
 }
 
@@ -175,8 +180,11 @@ static void process_command(hpcmd_conn_data_t *conn, headphones_packet_t command
     switch (command.command) {
         case HPCMD_NO_COMMAND:
             break;
-        case HPCMD_PING:
-            conn->session.ping.last_ts = (uint32_t)time(NULL);
+        case HPCMD_PING: {
+            struct timespec ts;
+            clock_gettime(CLOCK_MONOTONIC, &ts);
+            conn->session.ping.last_ts = (uint32_t)ts.tv_sec;
+            }
             break;
         case HPCMD_DISCONNECT:
             rtp_connection_stop(conn->rtp_conn_ptr);
@@ -316,7 +324,9 @@ static void *hpcmd_ping_task(void *arg) {
         hpcmd_queue_push(&conn->session, &command);
         usleep(PING_INTERVAL_MS * 1000);
 
-        uint32_t now = (uint32_t)time(NULL);
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        uint32_t now = (uint32_t)ts.tv_sec;
         if (now - conn->session.ping.last_ts > PING_TIMEOUT_S) {
             rtp_connection_stop(conn->rtp_conn_ptr);
             hpcmd_conn_stop(conn);  // FIXME: thread stops itself

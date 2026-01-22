@@ -97,7 +97,11 @@ static int ping_data_init(void) {
     ping.pack_lost = 0;
     ping.exp_seq = 0;
     ping.send_seq = 0;
-    ping.last_ts = (uint32_t)time(NULL);
+
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    ping.last_ts = (uint32_t)ts.tv_sec;
+
     return 0;
 }
 
@@ -111,7 +115,9 @@ static void process_command(headphones_packet_t *command_ptr) {
             break;
         case HPCMD_PING:
             if (xSemaphoreTake(ping.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-                ping.last_ts = (uint32_t)time(NULL);
+                struct timespec ts;
+                clock_gettime(CLOCK_MONOTONIC, &ts);
+                ping.last_ts = (uint32_t)ts.tv_sec;
                 xSemaphoreGive(ping.mutex);
             } else {
                 ESP_LOGW(TAG, "Failed to take ping mutex");
@@ -260,7 +266,9 @@ static void ping_task(void *arg) {
             .timestamp = htonl((uint32_t)time(NULL)),
         };
         // check last received ping
-        uint32_t now = (uint32_t)time(NULL);
+        struct timespec ts;
+        clock_gettime(CLOCK_MONOTONIC, &ts);
+        uint32_t now = (uint32_t)ts.tv_sec;
         if (now - ping.last_ts > PING_TIMEOUT_S) {
             xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_LOST_CONNECTION);
             ESP_LOGW(TAG, "Lost connection (ping timeout)");

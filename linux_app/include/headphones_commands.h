@@ -50,7 +50,6 @@ typedef struct {
 typedef struct {
     pthread_mutex_t mutex;
     atomic_bool is_running;
-    bool has_active_session;
 
     pthread_t ping_tid;
     pthread_t sender_tid;

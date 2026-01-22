@@ -346,7 +346,6 @@ void hpcmd_conn_stop(hpcmd_conn_data_t *data) {
     }
 
     pthread_mutex_lock(&data->mutex);
-    data->has_active_session = false;
     hpcmd_session_destroy(&data->session);
     pthread_mutex_unlock(&data->mutex);
 }
@@ -354,7 +353,7 @@ void hpcmd_conn_stop(hpcmd_conn_data_t *data) {
 int hpcmd_conn_start(hpcmd_conn_data_t *data, const char ipv4[16]) {
     pthread_mutex_lock(&data->mutex);
 
-    if (data->has_active_session) {
+    if (atomic_load(&data->is_running)) {
         syslog(LOG_WARNING, "HPCMD has active session");
         pthread_mutex_unlock(&data->mutex);
         return -1;
@@ -390,7 +389,6 @@ int hpcmd_conn_start(hpcmd_conn_data_t *data, const char ipv4[16]) {
         return -1;
     }
 
-    data->has_active_session = true;
     pthread_mutex_unlock(&data->mutex);
     return 0;
 }
@@ -402,7 +400,6 @@ int hpcmd_conn_data_init(hpcmd_conn_data_t *data, rtp_connection_data_t *rtp_con
     }
 
     atomic_store(&data->is_running, false);
-    data->has_active_session = false;
     data->receiver_tid = 0;
     data->sender_tid = 0;
     data->ping_tid = 0;

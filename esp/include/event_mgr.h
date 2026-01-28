@@ -49,8 +49,6 @@ typedef enum {
 } system_signals_e;
 
 typedef struct {
-    SemaphoreHandle_t mutex;
-
     char host_ip4[IP4ADDR_STRLEN_MAX];
 
     system_states_e curr_state;

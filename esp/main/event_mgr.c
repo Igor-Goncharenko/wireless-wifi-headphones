@@ -12,11 +12,6 @@ event_mgr_t g_event_mgr;
 int init_event_mgr(void) {
     memset(&g_event_mgr, 0, sizeof(event_mgr_t));
 
-    if ((g_event_mgr.mutex = xSemaphoreCreateMutex()) == NULL) {
-        ESP_LOGE(TAG, "Failed to init mutex");
-        return -1;
-    }
-
     g_event_mgr.states = xEventGroupCreate();
     g_event_mgr.events = xEventGroupCreate();
     g_event_mgr.signals = xEventGroupCreate();
@@ -33,7 +28,6 @@ int init_event_mgr(void) {
 }
 
 void destroy_event_mgr(void) {
-    if (g_event_mgr.mutex) vSemaphoreDelete(g_event_mgr.mutex);
     if (g_event_mgr.states) vEventGroupDelete(g_event_mgr.states);
     if (g_event_mgr.events) vEventGroupDelete(g_event_mgr.events);
     if (g_event_mgr.signals) vEventGroupDelete(g_event_mgr.signals);
@@ -43,10 +37,6 @@ void destroy_event_mgr(void) {
 }
 
 static void handle_state_machine(EventBits_t events, EventBits_t states) {
-    if (xSemaphoreTake(g_event_mgr.mutex, pdMS_TO_TICKS(50)) == pdFALSE) {
-        ESP_LOGE(TAG, "Failed to take mgr mutex");
-        return;
-    }
     if (events & EV_WIFI_DISCONNECTED) {
         xEventGroupClearBits(g_event_mgr.states, ST_WIFI_CONNECTED);
         xEventGroupSetBits(g_event_mgr.signals, SIG_RECONNECT_WIFI);
@@ -65,7 +55,6 @@ static void handle_state_machine(EventBits_t events, EventBits_t states) {
                 break;
         }
         ESP_LOGE(TAG, "Failed to init WiFi");
-        xSemaphoreGive(g_event_mgr.mutex);
         return;
     }
 
@@ -113,8 +102,6 @@ static void handle_state_machine(EventBits_t events, EventBits_t states) {
         default:
             break;
     }
-
-    xSemaphoreGive(g_event_mgr.mutex);
 }
 
 void event_mgr_task(void *arg) {

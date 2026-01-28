@@ -210,15 +210,10 @@ static void handshake_server_task(void *arg) {
                     ESP_LOGE(TAG, "HANDSHAKE_RESPONSE send failed");
                 }
 
-                if (xSemaphoreTake(g_event_mgr.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
-                    xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_CONNECTED);
-                    inet_ntop(AF_INET, &client_addr.sin_addr, g_event_mgr.host_ip4,
-                              sizeof(g_event_mgr.host_ip4));
-                    ESP_LOGI(TAG, "Connection accepted from %s", g_event_mgr.host_ip4);
-                    xSemaphoreGive(g_event_mgr.mutex);
-                } else {
-                    ESP_LOGW(TAG, "Failed to lock g_conn_cfg mutex");
-                }
+                xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_CONNECTED);
+                inet_ntop(AF_INET, &client_addr.sin_addr, g_event_mgr.host_ip4,
+                          sizeof(g_event_mgr.host_ip4));
+                ESP_LOGI(TAG, "Connection accepted from %s", g_event_mgr.host_ip4);
             }
         } else if (recv_len < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {   // ignore timeout
             ESP_LOGE(TAG, "recvfrom failed: errno=%d, strerror=\"%s\"", errno, strerror(errno));

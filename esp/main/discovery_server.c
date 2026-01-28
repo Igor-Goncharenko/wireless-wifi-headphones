@@ -10,6 +10,7 @@
 #include "lwip/sockets.h"
 #include "sdkconfig.h"
 #include <errno.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdbool.h>
 #include <time.h>
@@ -25,7 +26,7 @@
 static const char *TAG = "WHP " __FILE__;
 static TaskHandle_t s_handshake_hndl = NULL;
 static TaskHandle_t s_discovery_hndl = NULL;
-static bool s_running = false;
+static atomic_bool s_running = ATOMIC_VAR_INIT(false);
 
 static int s_discovery_sockfd = -1;
 static int s_handshake_sockfd = -1;
@@ -116,7 +117,7 @@ static void discovery_server_task(void *arg) {
 
     ESP_LOGI(TAG, "Discovery server started on port %d", DISCOVERY_PORT);
 
-    while (s_running) {
+    while (atomic_load(&s_running)) {
         recv_len = recvfrom(s_discovery_sockfd, buffer, sizeof(buffer) - 1, 0,
                             (struct sockaddr *)&client_addr, &client_len);
         
@@ -190,7 +191,7 @@ static void handshake_server_task(void *arg) {
 
     ESP_LOGI(TAG, "Handshake task started");
 
-    while (s_running) {
+    while (atomic_load(&s_running)) {
         struct sockaddr_in client_addr;
         socklen_t client_len = sizeof(client_addr);
 
@@ -242,13 +243,13 @@ static void discovery_start(void) {
         return;
     }
 
-    s_running = true;
+    atomic_store(&s_running, true);
     xTaskCreate(handshake_server_task, "handshake_server_task", 4096, NULL, 5, &s_handshake_hndl);
     xTaskCreate(discovery_server_task, "discovery_server_task", 4096, NULL, 5, &s_discovery_hndl);
 }
 
 static void discovery_stop(void) {
-    s_running = false;
+    atomic_store(&s_running, false);
     vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
     if (s_handshake_hndl != NULL) {
         vTaskDelete(s_handshake_hndl);

@@ -58,15 +58,6 @@ void app_main(void) {
 
     wifi_init_sta();
 
-    //while (1) {
-    //    system_events_e events = xEventGroupGetBits(g_event_mgr.states);
-    //    if (events & ST_INITIALIZED) ESP_LOGI(TAG, "ST_INITIALIZED");
-    //    if (events & ST_DISCOVERY_ACTIVE) ESP_LOGI(TAG, "ST_DISCOVERY_ACTIVE");
-    //    if (events & ST_CLIENT_CONNECTED) ESP_LOGI(TAG, "ST_CLIENT_CONNECTED");
-    //    if (events & ST_WIFI_CONNECTED) ESP_LOGI(TAG, "ST_WIFI_CONNECTED");
-    //    vTaskDelay(pdMS_TO_TICKS(2000));
-    //}
-
     while (1) {
         xEventGroupWaitBits(
             g_event_mgr.signals,

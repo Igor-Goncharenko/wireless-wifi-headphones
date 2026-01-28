@@ -20,7 +20,6 @@ static int s_retry_num = 0;
 static char s_ip4_str[IP4ADDR_STRLEN_MAX];
 static esp_event_handler_instance_t s_instance_any_id = NULL;
 static esp_event_handler_instance_t s_instance_got_ip = NULL;
-
 static esp_netif_t *s_netif_hndl = NULL;
 
 static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t event_id,

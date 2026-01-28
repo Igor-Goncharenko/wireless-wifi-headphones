@@ -6,6 +6,7 @@
 #include "freertos/event_groups.h"
 #include "esp_log.h"
 #include "lwip/sockets.h"
+#include <stdatomic.h>
 #include <string.h>
 
 #include "audio.h"
@@ -13,13 +14,13 @@
 #include "event_mgr.h"
 #include "protocols/rtp.h"
 
-static const char *TAG = "WHP " __FILE__;
-static bool s_running = false;
-static TaskHandle_t s_rtp_hndl = NULL;
-static rtp_server_t s_server = { 0 };
-
 #define RTP_SOCK_TIMEOUT_MS 1000
 #define DELAY_BEFORE_FORCE_TASK_DEL_MS (RTP_SOCK_TIMEOUT_MS + 200)
+
+static const char *TAG = "WHP " __FILE__;
+static TaskHandle_t s_rtp_hndl = NULL;
+static rtp_server_t s_server = { 0 };
+static atomic_bool s_running = ATOMIC_VAR_INIT(false);
 
 static int rtp_server_init(void) {
     memset(&s_server, 0, sizeof(rtp_server_t));
@@ -83,7 +84,7 @@ static void rtp_receiver_task(void *arg) {
 
     ESP_LOGI(TAG, "RTP server started on port %d", RTP_PORT);
     
-    while (s_running) {
+    while (atomic_load(&s_running)) {
         recv_len = recvfrom(s_server.sockfd, buffer, sizeof(buffer), 0,
                             (struct sockaddr *)&client_addr, &client_len);
         
@@ -154,12 +155,12 @@ static void rtp_start(void) {
         return;
     }
 
-    s_running = true;
+    atomic_store(&s_running, true);
     xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, NULL, 5, &s_rtp_hndl);
 }
 
 static void rtp_stop(void) {
-    s_running = false;
+    atomic_store(&s_running, false);
     vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
     if (s_rtp_hndl != NULL) {
         vTaskDelete(s_rtp_hndl);
@@ -194,7 +195,7 @@ void rtp_server_mgr_task(void *arg) {
 }
 
 void clear_rtp_sock_before_restart(void) {
-    if (s_running) {
+    if (atomic_load(&s_running)) {
         rtp_stop();
     } else {
         // if the rtp_stop has not yet ended

@@ -6,6 +6,7 @@
 #include "freertos/ringbuf.h"
 #include "driver/i2s_std.h"
 #include "esp_log.h"
+#include <stdatomic.h>
 #include <stdbool.h>
 
 #include "event_mgr.h"
@@ -14,7 +15,7 @@ static const char *TAG = "WHP " __FILE__;
 static TaskHandle_t s_audio_hndl = NULL;
 static RingbufHandle_t s_rb_hndl = NULL;
 static i2s_chan_handle_t s_i2s_hndl = NULL;
-static bool s_running = false;
+static atomic_bool s_running = ATOMIC_VAR_INIT(false);
 
 #define I2S_WRITE_TIMEOUT_MS 10
 #define RB_RECV_TIMEOUT_MS 100
@@ -75,7 +76,7 @@ static void audio_play_task(void *arg) {
 
     ESP_LOGI(TAG, "audio_play_task started");
 
-    while (s_running) {
+    while (atomic_load(&s_running)) {
         item = (uint8_t*)xRingbufferReceive(s_rb_hndl, &item_size,
                                             pdMS_TO_TICKS(RB_RECV_TIMEOUT_MS));
 
@@ -102,8 +103,20 @@ int audio_init(void) {
     return 0;
 }
 
-const RingbufHandle_t *get_rb_ptr(void) {
-    return &s_rb_hndl;
+static void audio_task_start(void) {
+    atomic_store(&s_running, true);
+    xTaskCreate(audio_play_task, "audio_play_task", 4096, NULL, 5, &s_audio_hndl);
+}
+
+static void audio_task_stop(void) {
+    atomic_store(&s_running, false);
+    vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
+    if (s_audio_hndl != NULL) {
+        vTaskDelete(s_audio_hndl);
+        s_audio_hndl = NULL;
+        ESP_LOGW(TAG, "Audio task did not stop properly, forcing stop");
+    }
+    clear_ringbuf();
 }
 
 void audio_play_mgr(void *arg) {
@@ -116,8 +129,7 @@ void audio_play_mgr(void *arg) {
             portMAX_DELAY
         );
 
-        s_running = true;
-        xTaskCreate(audio_play_task, "audio_play_task", 4096, NULL, 5, &s_audio_hndl);
+        audio_task_start();
 
         xEventGroupWaitBits(
             g_event_mgr.signals,
@@ -127,18 +139,18 @@ void audio_play_mgr(void *arg) {
             portMAX_DELAY
         );
 
-        s_running = false;
-        vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
-        if (s_audio_hndl != NULL) {
-            vTaskDelete(s_audio_hndl);
-            s_rb_hndl = NULL;
-            ESP_LOGW(TAG, "Audio task did not stop properly, forcing stop");
-        }
-        clear_ringbuf();
+        audio_task_stop();
     }
 }
 
 void audio_deinit_before_restart(void) {
+    if (atomic_load(&s_running)) {
+        audio_task_stop();
+    } else {
+        // if the audio task has not yet ended
+        vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
+    }
+
     if (s_audio_hndl != NULL) {
         vTaskSuspend(s_audio_hndl);
     }
@@ -152,4 +164,8 @@ void audio_deinit_before_restart(void) {
         s_i2s_hndl = NULL;
     }
     ESP_LOGI(TAG, "Audio deinitialized");
+}
+
+const RingbufHandle_t *get_rb_ptr(void) {
+    return &s_rb_hndl;
 }

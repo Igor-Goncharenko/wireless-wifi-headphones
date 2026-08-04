@@ -13,8 +13,9 @@
 #include <time.h>
 
 #include "config.h"
-#include "protocols/headphones.h"
 #include "event_mgr.h"
+#include "protocols/headphones.h"
+#include "state.h"
 
 #define COMMANDS_SOCK_TIMEOUT_MS 1000
 #define DELAY_BEFORE_FORCE_TASK_DEL_MS (COMMANDS_SOCK_TIMEOUT_MS + 200)
@@ -31,6 +32,12 @@ static TaskHandle_t s_cmds_ping_hndl = NULL;
 static QueueHandle_t s_cmds_queue_hndl = NULL;
 
 static int commands_server_init(void) {
+    s_cmds_queue_hndl = xQueueCreate(CMDS_QUEUE_SIZE, sizeof(headphones_packet_t));
+    if (s_cmds_queue_hndl == NULL) {
+        ESP_LOGE(TAG, "Failed to create commands queue");
+        return -1;
+    }
+
     s_server.mutex = xSemaphoreCreateMutex();
     if (s_server.mutex == NULL) {
         ESP_LOGE(TAG, "Failed to init server mutex");
@@ -70,7 +77,7 @@ static int commands_server_init(void) {
     s_server.pack_lost = 0;
     s_server.exp_seq = 0;
     s_server.send_seq = 0;
-    s_server.allowed_ip4.s_addr = ipaddr_addr(g_event_mgr.host_ip4);
+    s_server.allowed_ip4.s_addr = ipaddr_addr(host_ip4);
 
     ESP_LOGI(TAG, "Commands server initialized: sockfd=%d, port=%d", s_server.sockfd,
              HEADPHONES_CMD_PORT);
@@ -124,7 +131,7 @@ static void process_command(headphones_packet_t *command_ptr) {
             }
             break;
         case HPCMD_DISCONNECT:
-            xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_DISCONNECTED);
+            event_mgr_send_event(EV_CLIENT_DISCONNECTED);
             break;
         default:
             ESP_LOGW(TAG, "Unprocessed headphones command 0x%02x", command_ptr->command);
@@ -270,7 +277,7 @@ static void ping_task(void *arg) {
         clock_gettime(CLOCK_MONOTONIC, &ts);
         uint32_t now = (uint32_t)ts.tv_sec;
         if (now - ping.last_ts > PING_TIMEOUT_S) {
-            xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_LOST_CONNECTION);
+            event_mgr_send_event(EV_CLIENT_LOST_CONNECTION);
             ESP_LOGW(TAG, "Lost connection (ping timeout)");
         }
 
@@ -289,10 +296,10 @@ static void ping_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-static void commands_server_start(void) {
+void commands_server_start(void) {
     if (commands_server_init() != 0 || ping_data_init() != 0) {
         ESP_LOGE(TAG, "Failed to init commands server");
-        xEventGroupSetBits(g_event_mgr.events, EV_CMDS_SERVER_INIT_FAILED);
+        event_mgr_send_event(EV_CMDS_SERVER_INIT_FAILED);
         return;
     }
     atomic_store(&s_running, true);
@@ -301,7 +308,7 @@ static void commands_server_start(void) {
     xTaskCreate(ping_task, "ping_task", 4096, NULL, 5, &s_cmds_ping_hndl);
 }
 
-static void commands_server_stop(void) {
+void commands_server_stop(void) {
     atomic_store(&s_running, false);
     vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
     if (s_cmds_recv_hndl != NULL) {
@@ -342,37 +349,6 @@ int push_command(uint8_t command_type) {
     } else {
         ESP_LOGW(TAG, "Failed to send command to queue");
         return -1;
-    }
-}
-
-void commands_server_mgr_task(void *arg) {
-    s_cmds_queue_hndl = xQueueCreate(CMDS_QUEUE_SIZE, sizeof(headphones_packet_t));
-    if (s_cmds_queue_hndl == NULL) {
-        ESP_LOGE(TAG, "Failed to init commands server");
-        xEventGroupSetBits(g_event_mgr.events, EV_CMDS_SERVER_INIT_FAILED);
-        return;
-    }
-
-    while (1) {
-        xEventGroupWaitBits(
-            g_event_mgr.signals,
-            SIG_START_COMMANDS,
-            pdTRUE,
-            pdTRUE,
-            portMAX_DELAY
-        );
-
-        commands_server_start();
-
-        xEventGroupWaitBits(
-            g_event_mgr.signals,
-            SIG_STOP_COMMANDS,
-            pdTRUE,
-            pdTRUE,
-            portMAX_DELAY
-        );
-
-        commands_server_stop();
     }
 }
 

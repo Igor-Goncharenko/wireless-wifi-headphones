@@ -33,9 +33,11 @@ typedef struct {
     struct in_addr allowed_ip4;
 } commands_server_t;
 
-int push_command(uint8_t command_type);
+void commands_server_start(void);
 
-void commands_server_mgr_task(void *arg);
+void commands_server_stop(void);
+
+int push_command(uint8_t command_type);
 
 void clear_commands_sock_before_restart(void);
 

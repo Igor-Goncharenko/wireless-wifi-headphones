@@ -18,7 +18,9 @@ typedef struct {
     const RingbufHandle_t *rb;
 } rtp_server_t;
 
-void rtp_server_mgr_task(void *arg);
+void rtp_start(void);
+
+void rtp_stop(void);
 
 void clear_rtp_sock_before_restart(void);
 

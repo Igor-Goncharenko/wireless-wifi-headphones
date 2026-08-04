@@ -39,7 +39,9 @@ int audio_init(void);
 
 const RingbufHandle_t *get_rb_ptr(void);
 
-void audio_play_mgr(void *arg);
+void audio_task_start(void);
+
+void audio_task_stop(void);
 
 void audio_deinit_before_restart(void);
 

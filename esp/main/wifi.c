@@ -1,9 +1,9 @@
 #include "wifi.h"
 
-#include "esp_netif.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "esp_wifi.h"
+#include "esp_netif.h"
 #include "esp_event.h"
 #include "esp_log.h"
 #include "sdkconfig.h"
@@ -44,7 +44,7 @@ static void wifi_event_handler(void *arg, esp_event_base_t event_base, int32_t e
                 ESP_LOGW(TAG, "retry to connect to the AP %d/%d", s_retry_num,
                          CONFIG_WIFI_MAXIMUM_RETRY);
             } else {
-                xEventGroupSetBits(g_event_mgr.events, EV_WIFI_INIT_FAILED);
+                event_mgr_send_event(EV_WIFI_INIT_FAILED);
             }
             ESP_LOGI(TAG,"connect to the AP fail");
             }
@@ -73,7 +73,7 @@ static void ip_event_handler(void *arg, esp_event_base_t event_base, int32_t eve
             sprintf(s_ip4_str, IPSTR, IP2STR(&event->ip_info.ip));
             ESP_LOGI(TAG, "got ip:" IPSTR, IP2STR(&event->ip_info.ip));
             s_retry_num = 0;
-            xEventGroupSetBits(g_event_mgr.events, EV_WIFI_GOT_IP);
+            event_mgr_send_event(EV_WIFI_GOT_IP);
             break;
         default:
             break;

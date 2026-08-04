@@ -13,12 +13,12 @@
 #include <stdatomic.h>
 #include <stdio.h>
 #include <stdbool.h>
-#include <time.h>
 
 #include "config.h"
 #include "wifi.h"
 #include "protocols/discovery.h"
 #include "event_mgr.h"
+#include "state.h"
 
 #define DISCOVERY_SOCK_TIMEOUT_MS 1000
 #define DELAY_BEFORE_FORCE_TASK_DEL_MS (DISCOVERY_SOCK_TIMEOUT_MS + 200)
@@ -210,10 +210,10 @@ static void handshake_server_task(void *arg) {
                     ESP_LOGE(TAG, "HANDSHAKE_RESPONSE send failed");
                 }
 
-                xEventGroupSetBits(g_event_mgr.events, EV_CLIENT_CONNECTED);
-                inet_ntop(AF_INET, &client_addr.sin_addr, g_event_mgr.host_ip4,
-                          sizeof(g_event_mgr.host_ip4));
-                ESP_LOGI(TAG, "Connection accepted from %s", g_event_mgr.host_ip4);
+                event_mgr_send_event(EV_CLIENT_CONNECTED);
+
+                inet_ntop(AF_INET, &client_addr.sin_addr, host_ip4, sizeof(host_ip4));
+                ESP_LOGI(TAG, "Connection accepted from %s", host_ip4);
             }
         } else if (recv_len < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {   // ignore timeout
             ESP_LOGE(TAG, "recvfrom failed: errno=%d, strerror=\"%s\"", errno, strerror(errno));
@@ -225,16 +225,16 @@ static void handshake_server_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-static void discovery_start(void) {
+void discovery_start(void) {
     if (discovery_server_init() != 0) {
         ESP_LOGE(TAG, "Failed to init discovery server");
-        xEventGroupSetBits(g_event_mgr.events, EV_DISCOVERY_INIT_FAILED);
+        event_mgr_send_event(EV_DISCOVERY_FAILED);
         return;
     }
     if (handshake_server_init() != 0) {
         ESP_LOGE(TAG, "Failed to init handshake server");
         discovery_server_destroy();
-        xEventGroupSetBits(g_event_mgr.events, EV_DISCOVERY_INIT_FAILED);
+        event_mgr_send_event(EV_DISCOVERY_FAILED);
         return;
     }
 
@@ -243,7 +243,7 @@ static void discovery_start(void) {
     xTaskCreate(discovery_server_task, "discovery_server_task", 4096, NULL, 5, &s_discovery_hndl);
 }
 
-static void discovery_stop(void) {
+void discovery_stop(void) {
     atomic_store(&s_running, false);
     vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
     if (s_handshake_hndl != NULL) {
@@ -261,32 +261,8 @@ static void discovery_stop(void) {
     handshake_server_destroy();
 }
 
-void discovery_server_mgr_task(void *arg) {
-    while (1) {
-        xEventGroupWaitBits(
-            g_event_mgr.signals,
-            SIG_START_DISCOVERY,
-            pdTRUE,
-            pdTRUE,
-            portMAX_DELAY
-        );
-
-        discovery_start();
-
-        xEventGroupWaitBits(
-            g_event_mgr.signals,
-            SIG_STOP_DISCOVERY,
-            pdTRUE,
-            pdTRUE,
-            portMAX_DELAY
-        );
-
-        discovery_stop();
-    }
-}
-
 void clear_discovery_before_restart(void) {
-    if (s_running) {
+    if (atomic_load(&s_running)) {
         discovery_stop();
     } else {
         // if the discovery_stop has not yet ended

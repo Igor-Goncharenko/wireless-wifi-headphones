@@ -9,8 +9,6 @@
 #include <stdatomic.h>
 #include <stdbool.h>
 
-#include "event_mgr.h"
-
 static const char *TAG = "WHP " __FILE__;
 static TaskHandle_t s_audio_hndl = NULL;
 static RingbufHandle_t s_rb_hndl = NULL;
@@ -103,12 +101,12 @@ int audio_init(void) {
     return 0;
 }
 
-static void audio_task_start(void) {
+void audio_task_start(void) {
     atomic_store(&s_running, true);
     xTaskCreate(audio_play_task, "audio_play_task", 4096, NULL, 5, &s_audio_hndl);
 }
 
-static void audio_task_stop(void) {
+void audio_task_stop(void) {
     atomic_store(&s_running, false);
     vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
     if (s_audio_hndl != NULL) {
@@ -117,30 +115,6 @@ static void audio_task_stop(void) {
         ESP_LOGW(TAG, "Audio task did not stop properly, forcing stop");
     }
     clear_ringbuf();
-}
-
-void audio_play_mgr(void *arg) {
-    while (1) {
-        xEventGroupWaitBits(
-            g_event_mgr.signals,
-            SIG_START_AUDIO,
-            pdTRUE,
-            pdTRUE,
-            portMAX_DELAY
-        );
-
-        audio_task_start();
-
-        xEventGroupWaitBits(
-            g_event_mgr.signals,
-            SIG_STOP_AUDIO,
-            pdTRUE,
-            pdTRUE,
-            portMAX_DELAY
-        );
-
-        audio_task_stop();
-    }
 }
 
 void audio_deinit_before_restart(void) {

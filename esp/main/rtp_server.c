@@ -13,6 +13,7 @@
 #include "config.h"
 #include "event_mgr.h"
 #include "protocols/rtp.h"
+#include "state.h"
 
 #define RTP_SOCK_TIMEOUT_MS 1000
 #define DELAY_BEFORE_FORCE_TASK_DEL_MS (RTP_SOCK_TIMEOUT_MS + 200)
@@ -60,7 +61,7 @@ static int rtp_server_init(void) {
 
     s_server.rb = get_rb_ptr();
 
-    s_server.allowed_ip4.s_addr = ipaddr_addr(g_event_mgr.host_ip4);
+    s_server.allowed_ip4.s_addr = ipaddr_addr(host_ip4);
 
     ESP_LOGI(TAG, "RTP server initialized: sockfd=%d, port=%d", s_server.sockfd, RTP_PORT);
     return 0;
@@ -148,10 +149,10 @@ static void rtp_receiver_task(void *arg) {
     vTaskDelete(NULL);
 }
 
-static void rtp_start(void) {
+void rtp_start(void) {
     if (rtp_server_init() != 0) {
         ESP_LOGE(TAG, "Failed to init rtp server");
-        xEventGroupSetBits(g_event_mgr.events, EV_RTP_INIT_FAILED);
+        event_mgr_send_event(EV_RTP_INIT_FAILED);
         return;
     }
 
@@ -159,7 +160,7 @@ static void rtp_start(void) {
     xTaskCreate(rtp_receiver_task, "rtp_receiver_task", 4096, NULL, 5, &s_rtp_hndl);
 }
 
-static void rtp_stop(void) {
+void rtp_stop(void) {
     atomic_store(&s_running, false);
     vTaskDelay(pdMS_TO_TICKS(DELAY_BEFORE_FORCE_TASK_DEL_MS));
     if (s_rtp_hndl != NULL) {
@@ -168,30 +169,6 @@ static void rtp_stop(void) {
         ESP_LOGW(TAG, "RTP task did not stop properly, forcing stop");
     }
     rtp_server_destroy();
-}
-
-void rtp_server_mgr_task(void *arg) {
-    while (1) {
-        xEventGroupWaitBits(
-            g_event_mgr.signals,
-            SIG_START_RTP,
-            pdTRUE,
-            pdTRUE,
-            portMAX_DELAY
-        );
-
-        rtp_start();
-
-        xEventGroupWaitBits(
-            g_event_mgr.signals,
-            SIG_STOP_RTP,
-            pdTRUE,
-            pdTRUE,
-            portMAX_DELAY
-        );
-
-        rtp_stop();
-    }
 }
 
 void clear_rtp_sock_before_restart(void) {

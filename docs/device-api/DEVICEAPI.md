@@ -551,6 +551,7 @@ The audio format is specified during the handshake phase:
 ### RTP Packet Size Calculation
 
 The total RTP packet size consists of the fixed header and the variable payload:
+<<<<<<< HEAD
 ```
 packet_size = sizeof(rtp_header_t) + payload_size
 packet_size = 12 + payload_size
@@ -558,6 +559,7 @@ packet_size = 12 + payload_size
 
 The payload size depends on the audio parameters negotiated during handshake.
 Audio is typically transmitted in fixed-duration frames:
+<<<<<<< HEAD
 ```
 payload_size = (sample_rate × frame_duration_ms × channels × bit_width) / (1000 × 8)
 packet_size = sizeof(rtp_header_t) + (sample_rate × frame_duration_ms × channels × bit_width) / (1000 × 8)
@@ -570,6 +572,7 @@ Where:
 - `frame_duration_ms` — Frame duration in milliseconds, we will use `frame_duration_ms=10`
 
 Example: 44.1 kHz, Stereo, 16-bit
+<<<<<<< HEAD
 ```
 payload_size = (44100 × 10 × 2 × 16) / 8000 = 14112000 / 8000 = 1764 bytes
 packet_size = 12 + 1764 = 1776 bytes

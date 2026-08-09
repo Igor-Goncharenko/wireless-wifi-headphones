@@ -1,57 +1,163 @@
 # Wireless WiFi Headphones
 
-A groundbreaking open-source project to build truly wireless stereo
-full-size headphones that communicate over Wi-Fi, using the powerful 
-ESP32 microcontroller. This project explores the boundaries of 
-low-latency, high-quality audio streaming without relying on Bluetooth.
+A complete ecosystem for Wi-Fi audio streaming: desktop daemon, ESP32 firmware, and daemon-control interface.
 
-> **⚠️ Important Note: Experimental Project**
-> This is a **Work in Progress** and a highly complex project. Achieving
-> low-latency, synchronized audio over Wi-Fi is challenging. Expect to
-> encounter issues like latency, jitter, and sync drift. This repository
-> is for educational purposes and for developers interested in audio
-> streaming protocols.
 
-## Key Features & Goals
+## Overview
 
-- **Wi-Fi Audio Streaming:** Transmit stereo audio data over your local network instead of Bluetooth.
-- **Low Latency Protocol:** Utilizes UDP and Real-Time Transport Protocol (RTP) for faster transmission than TCP.
-- **I2S Audio Output:** High-quality audio output via the ESP32's I2S peripheral to a DAC and amplifier.
-- **Sample Rate & Depth:** Target 44.1 kHz / 16-bit CD-quality audio (subject to bandwidth and latency constraints).
-- **Server-Client Architecture:** A Python server runs on your PC, streaming audio directly to the headphones.
+This project is a complete implementation of a high-quality, low-latency audio streaming system designed
+for wireless headphones and speakers. Unlike traditional Bluetooth solutions, this system leverages Wi-Fi
+for higher bandwidth, better audio quality, and more flexible control
 
-## Hardware Requirements
+### What Makes This Project Special?
+- Complete Ecosystem: Desktop daemon, device firmware, and control interface working together
+- Wi-Fi Audio Streaming: High bandwidth for uncompressed CD-quality audio (44.1kHz/16-bit)
+- Low Latency: Optimized UDP/RTP protocol for real-time audio transmission
+- Remote Control: Web interface, CLI, or mobile app for device management
+- Open Source: Fully documented protocol specifications for extensibility
 
-### For the Headphones (Client)
+### Project Goals
+- Create a production-ready audio streaming system for wireless devices
+- Establish a well-documented, extensible protocol for Wi-Fi audio
+- Provide reference implementations for desktop daemon, ESP32 firmware, and daemon-control interface
+- Achieve < 50ms latency with stable, jitter-free audio playback
 
-- **1x ESP32 Dev Modules** (e.g., ESP32-WROOM-32)
-- **1x I2S DAC Amplifiers** (e.g., MAX98357A).
-- **2x Speakers / Headphone Drivers** (e.g., 40mm dynamic drivers, 32Ω impedance).
-- **1x Li-ion Battery** (e.g., 3.7V 1000mAh).
-- **2x Battery Charging/Protection Modules** (e.g., TP4056).
-- **Wires, Switches, and a 3D-Printed Enclosure.**
 
-### For the Audio Source (Server)
+## System Architecture
 
-- A computer (Windows, Linux, or macOS) with Python.
+The system consists of three main components that work together seamlessly:
 
-## How It Works
+```
+┌─────────────────────────────────────────────────────────────────┐
+│                     Control Interface                           │
+│               (Web, CLI, Mobile App, etc.)                      │
+│                                                                 │
+│  • Device discovery and management                              │
+│  • Volume control & playback status                             │
+│  • Real-time updates via WebSocket                              │
+│  • Cross-platform (browser, terminal, mobile)                   │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+                           │ Control API (REST)
+                           │ (JSON over HTTP)
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                      Desktop Daemon                             │
+│                                                                 │
+│  • Device discovery (UDP broadcast)                             │
+│  • Session management & handshake                               │
+│  • Command processing (volume, battery, etc.)                   │
+│  • Audio packet routing (RTP)                                   │
+│  • WebSocket server for UI                                      │
+│  • Audio device output (optional)                               │
+│  • Multi-device management                                      │
+└──────────────────────────┬──────────────────────────────────────┘
+                           │
+                           │ Device Protocol (UDP/TCP)
+                           │ (Binary, packed structures)
+                           ↓
+┌─────────────────────────────────────────────────────────────────┐
+│                     Edge Device                                 │
+│               (Headphones, Speaker, Receiver)                   │
+│                                                                 │
+│  • Network connectivity (Wi-Fi/Ethernet)                        │
+│  • Device discovery responder                                   │
+│  • Handshake & session negotiation                              │
+│  • Command handling (volume, battery monitoring)                │
+│  • RTP audio reception & buffering                              │
+│  • Audio output (DAC, I2S, analog)                              │
+│  • User input handling (buttons, touch)                         │
+│  • Status indicators (LEDs, display)                            │
+└─────────────────────────────────────────────────────────────────┘
+```
 
-1.  **Audio Capture:** The Python server on your PC captures system audio using `sounddevice` or `pyaudio`.
-2.  **Packetization:** The audio stream is packaged into UDP packets, often with an RTP header for timing information.
-3.  **Streaming:** Packets are continuously streamed to the "master" ESP32 on your local network.
-4.  **Reception & Processing:** The master ESP32 receives the packets, decodes the audio data, and handles the synchronization protocol.
-5.  **I2S Output:** The master ESP32 sends the audio data to its own I2S DAC and also relays the data to the "slave" ESP32 (for the other channel) via a secondary Wi-Fi link or ESP-NOW.
-6.  **Amplification:** The DACs convert the digital signal to analog, which is then amplified and played through the speakers.
+
+## API Overview
+
+This section describes the two core APIs that define communication between system components.
+
+### 1. Device Protocol API
+
+The Device Protocol API defines the binary-level communication protocol between the desktop daemon
+and edge devices (headphones, speakers, receivers). This low-level protocol handles device
+discovery, session negotiation, command exchange, and real-time audio streaming over UDP and TCP.
+It is designed to be lightweight, deterministic, and suitable for resource-constrained embedded
+systems, with packed binary structures, minimal overhead, and support for extensibility through
+reserved fields.
+
+The protocol operates in four distinct phases: **Discovery** (UDP broadcast to locate devices),
+**Handshake** (TCP session negotiation with audio parameter exchange), **Command Exchange** (TCP for
+control commands like volume and battery queries), and **Audio Streaming** (UDP/RTP for real-time
+audio transmission). All non-RTP packets share a common header with magic number validation,
+versioning, and length fields to ensure protocol integrity and forward compatibility.
+
+**Full Documentation:** [Device API Specification](./docs/device-api/DEVICEAPI.md)
+
+### 2. Daemon Control API
+
+The Daemon Control API provides a high-level, RESTful interface for controlling the audio system from
+any client application—web interfaces, CLI tools, mobile apps, or third-party integrations. Built on
+HTTP protocol with JSON payloads, this API abstracts away the complexity of the underlying device
+protocol, offering a clean, developer-friendly way to discover devices, manage connections, control
+audio settings, and receive real-time updates about device status changes.
+
+The API is organized into logical resource groups: **System** (daemon status and version),
+**Devices** (listing, connecting, disconnecting), and **Device Control** (volume, battery, audio
+parameters). **Real-time events** — such as device discovery, connection changes, volume updates, and
+battery notifications—are pushed to clients via WebSocket connections, enabling responsive user
+interfaces without continuous polling. The API follows RESTful conventions with standard HTTP
+methods, status codes, and includes OpenAPI/Swagger documentation for automatic client generation.
+
+**Full Documentation:** [Daemon API Specification](./docs/daemon-api/DAEMONAPI.md)
+
 
 ## Known Challenges & Limitations
 
-- **Latency:** The primary challenge. Wi-Fi stack processing, buffering, and network transmission can introduce significant delay (>50ms), making it unsuitable for real-time applications like gaming without advanced techniques.
-- **Jitter:** Network packet arrival time variation can cause audio glitches without a sophisticated jitter buffer.
-- **Power Consumption:** Wi-Fi is significantly more power-hungry than Bluetooth Low Energy (BLE). Battery life will be much shorter than commercial products.
-- **Error Handling:** The current implementation is a basic proof-of-concept. It lacks robust error correction for lost packets.
+This section outlines the key technical challenges and limitations of the current system.
+These are inherent to Wi-Fi audio streaming and represent active areas of development.
+
+### 1. Latency
+Achieving low-latency (< 50ms) audio over Wi-Fi is fundamentally challenging due to network stack
+processing overhead, variable network transmission times, and the trade-off between jitter buffer
+size and latency. The buffering required to handle network jitter directly increases end-to-end
+latency, making real-time applications like gaming particularly difficult.
+
+### 2. Jitter & Packet Loss
+Network packet arrival times vary significantly in real-world conditions, causing audio glitches
+and instability. Without robust mechanisms to handle packet loss and timing variations, audio
+quality degrades noticeably. The current approach to jitter buffering requires a careful balance
+between stability and latency.
+
+### 3. Power Consumption
+Wi-Fi communication consumes substantially more power than Bluetooth Low Energy (BLE) — typically
+10-20 times higher during active streaming. This significantly limits battery life compared to
+commercial Bluetooth audio products, requiring larger batteries or more aggressive power management
+strategies.
+
+### 4. Network Congestion
+Wi-Fi networks are shared mediums susceptible to interference and congestion, especially in dense
+urban environments with many competing devices. Audio streaming over UDP provides no congestion
+control or adaptive bitrate mechanisms, potentially leading to degraded audio quality during
+network congestion.
+
+### 5. Security
+The protocol currently provides no encryption, authentication, or integrity checks. All
+communication—including commands and audio data—is transmitted in plaintext over the network.
+This exposes the system to eavesdropping, unauthorized access, command injection, and replay attacks.
+
+### 6. Setup & Configuration
+Network configuration currently requires manual intervention. The system lacks zero-touch
+provisioning, automatic network discovery (mDNS/DNS-SD), and user-friendly setup workflows.
+This creates a barrier to entry for non-technical users.
+
+### 7. Audio Quality vs. Performance Trade-offs
+Higher sample rates, bit depths, and channel counts require significantly more bandwidth and
+processing power. Achieving CD-quality (44.1kHz/16-bit) or better audio while maintaining low
+latency and stable playback requires careful optimization and may not be feasible on all hardware
+platforms.
+
 
 ## License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the GPLv3 License - see the [LICENSE](LICENSE) file for details.
 

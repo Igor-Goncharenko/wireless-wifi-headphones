@@ -1,0 +1,425 @@
+# daemon-api-v1.yaml (OpenAPI 3.0)
+
+openapi: 3.0.0
+info:
+  title: Daemon Control API
+  version: 1.0.0
+  description: |
+    API for controlling the desktop daemon from interface.
+    This API is independent of the device protocol version.
+
+servers:
+  - url: http://localhost:8080/api/v1
+    description: Local daemon endpoint
+
+paths:
+  # === System ===
+  /system/status:
+    get:
+      summary: Get daemon status
+      responses:
+        '200':
+          description: Daemon status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: string
+                    example: "1.0.0"
+                  status:
+                    type: string
+                    enum: [running, stopped, error]
+                  uptime:
+                    type: integer
+                    description: Uptime in seconds
+        '500':
+          $ref: '#/components/responses/InternalError'
+        default:
+          $ref: '#/components/responses/UniversalError'
+
+  # === Devices ===
+  /devices:
+    get:
+      summary: List all discovered devices
+      responses:
+        '200':
+          description: List of devices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/Device'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        default:
+          $ref: '#/components/responses/UniversalError'
+
+  /devices/{device_id}/connect:
+    post:
+      summary: Connect to a device
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/DeviceID'
+      responses:
+        '200':
+          description: Device connected
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          # Device already busy
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        default:
+          $ref: '#/components/responses/UniversalError'
+
+  /devices/{device_id}/disconnect:
+    post:
+      summary: Disconnect from device
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/DeviceID'
+      responses:
+        '200':
+          description: Disconnected
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          # Device is not connected
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        default:
+          $ref: '#/components/responses/UniversalError'
+
+  # === Audio Control ===
+  /devices/{device_id}/volume:
+    get:
+      summary: Get current volume
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/DeviceID'
+      responses:
+        '200':
+          description: Volume level
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - volume
+                properties:
+                  volume:
+                    $ref: '#/components/schemas/Level'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          # Device is not connected
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        default:
+          $ref: '#/components/responses/UniversalError'
+
+    put:
+      summary: Set volume
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/DeviceID'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - volume
+              properties:
+                volume:
+                  $ref: '#/components/schemas/Level'
+      responses:
+        '200':
+          description: Volume updated
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          # Device is not connected
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        default:
+          $ref: '#/components/responses/UniversalError'
+
+  /devices/{device_id}/battery:
+    get:
+      summary: Get battery status
+      parameters:
+        - name: device_id
+          in: path
+          required: true
+          schema:
+            $ref: '#/components/schemas/DeviceID'
+      responses:
+        '200':
+          description: Battery information
+          content:
+            application/json:
+              schema:
+                type: object
+                required:
+                  - level
+                properties:
+                  level:
+                    $ref: '#/components/schemas/Level'
+                  charging:
+                    type: boolean
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '500':
+          $ref: '#/components/responses/InternalError'
+        default:
+          $ref: '#/components/responses/UniversalError'
+
+  # === WebSocket for events ===
+  /ws:
+    get:
+      summary: WebSocket endpoint for real-time events
+      x-websocket: true
+      description: |
+        Connect to receive real-time notifications about:
+        - Device discovery events
+        - Connection status changes
+        - Volume changes (including from device itself)
+        - Battery updates
+        Use /components/schemas/WebSocketMessage.
+
+components:
+  schemas:
+    Level:
+      type: integer
+      minimum: 0
+      maximum: 100
+      description: Battery/volume level (0-100)
+
+    WebSocketMessage:
+      type: object
+      required:
+        - type
+        - timestamp
+        - data
+      properties:
+        type:
+          type: string
+          description: Event type
+          enum:
+            - device_discovered
+            - device_lost
+            - device_updated
+            - volume_changed
+            - battery_updated
+            - error
+        timestamp:
+          type: string
+          format: date-time
+          description: Event timestamp (ISO 8601)
+        data:
+          type: object
+          description: |
+            Event data depending on type:
+            - device_discovered, device_lost, device_updated -> Device object
+            - volume_changed -> VolumeData
+            - battery_updated -> BatteryData
+            - error -> ErrorData
+          oneOf:
+            - $ref: '#/components/schemas/Device'
+            - $ref: '#/components/schemas/VolumeData'
+            - $ref: '#/components/schemas/BatteryData'
+            - $ref: '#/components/schemas/ErrorData'
+
+    DeviceID:
+      type: string
+      pattern: '^[0-9A-Fa-f]{12}$'
+      description: |
+        Unique device identifier.
+        MAC address without colons.
+
+    Device:
+      type: object
+      required:
+        - id
+        - name
+        - status
+      properties:
+        id:
+          $ref: '#/components/schemas/DeviceID'
+        name:
+          type: string
+          description: Human-readable device name
+        mac:
+          type: string
+          pattern: '^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$'
+          description: MAC address
+        ip:
+          type: string
+          description: IP address (IPv4 or IPv6)
+        status:
+          type: string
+          enum: [discovered, connecting, connected, disconnected, error]
+        battery:
+          $ref: '#/components/schemas/Level'
+          nullable: true
+        volume:
+          $ref: '#/components/schemas/Level'
+          nullable: true
+        audio_params:
+          type: object
+          properties:
+            sample_rate:
+              type: integer
+            channels:
+              type: integer
+              enum: [1, 2, 4]
+            bit_width:
+              type: integer
+              enum: [16, 24, 32]
+        last_seen:
+          type: string
+          format: date-time
+
+    VolumeData:
+      type: object
+      required:
+        - device_id
+        - volume
+      properties:
+        device_id:
+          $ref: '#/components/schemas/DeviceID'
+        volume:
+          $ref: '#/components/schemas/Level'
+        old_volume:
+          $ref: '#/components/schemas/Level'
+
+    BatteryData:
+      type: object
+      required:
+        - device_id
+        - level
+        - charging
+      properties:
+        device_id:
+          $ref: '#/components/schemas/DeviceID'
+        level:
+          $ref: '#/components/schemas/Level'
+        charging:
+          type: boolean
+
+    ErrorModel:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          description: Error code for programmatic handling
+          enum:
+            - INVALID_DEVICE_ID
+            - DEVICE_NOT_FOUND
+            - DEVICE_ALREADY_CONNECTED
+            - DEVICE_NOT_CONNECTED
+            - INTERNAL_ERROR
+            - UNKNOWN_ERROR
+        message:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        device_id:
+          $ref: '#/components/schemas/DeviceID'
+          nullable: true
+        details:
+          type: object
+
+  responses:
+    BadRequest:             # 400
+      description: Invalid request (data validation error).
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorModel'
+          example:
+            code: "INVALID_DEVICE_ID"
+            message: "Invalid device id"
+
+    NotFound:               # 404
+      description: Not found.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorModel'
+          example:
+            code: "DEVICE_NOT_FOUND"
+            message: "Unknown device id"  # The device identifier format is correct, but it is unknown.
+
+    Conflict:               # 409
+      description: Device conflict.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorModel'
+          examples:
+            already_connected:
+              summary: Device already connected
+              value:
+                code: "DEVICE_ALREADY_CONNECTED"
+                message: "Device already busy"
+            not_connected:
+              summary: Device not connected
+              value:
+                code: "DEVICE_NOT_CONNECTED"
+                message: "Device is not connected"
+
+    InternalServerError:    # 500
+      description: Internal server error.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorModel'
+          example:
+            code: "INTERNAL_ERROR"
+            message: "Unexpected server error. Code: err_98234"
+
+    UniversalError:
+      description: Any HTTP error (4xx, 5xx) not explicitly described.
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ErrorModel'
+

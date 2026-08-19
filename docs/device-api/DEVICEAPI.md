@@ -2,24 +2,26 @@
 
 **Version:** 0.0.0 (in development)
 
-
 # 1. Overview
+
 ## 1.1 Purpose
 
 This protocol defines the communication interface between a desktop daemon (client) and an edge
 device (e.g., wireless headphones, smart speaker, audio receiver). The protocol enables:
+
 1. Device discovery on the local network
-2. Session negotiation and parameter configuration
-3. Remote control and status monitoring
-4. High-quality audio streaming
+1. Session negotiation and parameter configuration
+1. Remote control and status monitoring
+1. High-quality audio streaming
 
 ## 1.2 Scope
 
 The protocol covers four distinct phases of communication:
+
 1. Discovery — Locating available edge devices on the network
-2. Handshake — Negotiating audio parameters and establishing communication channels
-3. Command Exchange — Sending control commands and receiving responses
-4. Audio Streaming — Transmitting real-time audio data via RTP
+1. Handshake — Negotiating audio parameters and establishing communication channels
+1. Command Exchange — Sending control commands and receiving responses
+1. Audio Streaming — Transmitting real-time audio data via RTP
 
 ## 1.3 Conventions
 
@@ -28,13 +30,13 @@ The protocol covers four distinct phases of communication:
 All protocol structures are defined using C-style data types from `<stdint.h>` and `<stdbool.h>`.
 Implementations in other languages SHOULD use equivalent fixed-size types:
 
-| C Type     | Size (bytes) | Description                                   |
-| :--------- | :----------- | :-------------------------------------------- |
-| `uint8_t`  | 1            | Unsigned 8-bit integer                        |
-| `uint16_t` | 2            | Unsigned 16-bit integer (little-endian)       |
-| `uint32_t` | 4            | Unsigned 32-bit integer (little-endian)       |
-| `bool`     | 1            | Boolean value (0 = false, 1 = true)           |
-| `char`     | N            | N	Fixed-size ASCII string (null-terminated)   |
+| C Type     | Size (bytes) | Description                                 |
+| :--------- | :----------- | :------------------------------------------ |
+| `uint8_t`  | 1            | Unsigned 8-bit integer                      |
+| `uint16_t` | 2            | Unsigned 16-bit integer (little-endian)     |
+| `uint32_t` | 4            | Unsigned 32-bit integer (little-endian)     |
+| `bool`     | 1            | Boolean value (0 = false, 1 = true)         |
+| `char`     | N            | N Fixed-size ASCII string (null-terminated) |
 
 **Byte Order**
 
@@ -100,9 +102,9 @@ identification and handshake port information.
 
 **Direction:** Daemon → Device (request), Device → Client (response)
 
-The request SHOULD be sent as a UDP broadcast to the network broadcast address
-(e.g., `192.168.0.255/24`) or to a configured multicast group. The daemon SHOULD listen on the
-same port for responses.
+The request SHOULD be sent as a UDP broadcast to the network broadcast address (e.g.,
+`192.168.0.255/24`) or to a configured multicast group. The daemon SHOULD listen on the same port
+for responses.
 
 ### Discovery Request (`discovery_request_t`)
 
@@ -133,7 +135,7 @@ An edge device sends this response to announce its presence and capabilities aft
 discovery request.
 
 | Field            | Type                | Size | Description                                                 |
-| :--------------- | :---                | :--- | :---------------------------------------------------------- |
+| :--------------- | :------------------ | :--- | :---------------------------------------------------------- |
 | `header`         | `protocol_header_t` | 8    | Protocol header (magic, version, length)                    |
 | `name`           | `char[64]`          | 64   | Human-readable device name (null-terminated ASCII)          |
 | `mac`            | `char[18]`          | 18   | MAC address in format `XX:XX:XX:XX:XX:XX` (null-terminated) |
@@ -147,12 +149,14 @@ discovery request.
 **Response Behavior**
 
 Upon receiving a discovery request, the device SHOULD:
+
 1. Validate the request header (magic, length, version)
-2. Prepare a response with its current configuration
-3. Send the response to the source address and port of the request
-4. NOT respond if the request is malformed or invalid
+1. Prepare a response with its current configuration
+1. Send the response to the source address and port of the request
+1. NOT respond if the request is malformed or invalid
 
 **IP Address Handling**
+
 - IPv4 addresses are stored in bytes 0-3 of the `ip` field, with the remaining bytes set to zero
 - IPv6 addresses use all 16 bytes of the `ip` field
 - The `is_ipv6` flag determines how to interpret the ip field
@@ -176,7 +180,6 @@ typedef struct {
 } __attribute__((packed)) discovery_response_t;
 ```
 
-
 ## 2.4. Handshake Phase
 
 The Handshake phase establishes a session between the desktop daemon and the edge device. The daemon
@@ -194,7 +197,7 @@ exchange and RTP audio streaming.
 The desktop daemon initiates the handshake to request a session with the edge device and negotiate
 audio parameters.
 
-| Field	   | Type                | Size | Description                                   |
+| Field    | Type                | Size | Description                                   |
 | :------- | :------------------ | :--- | :-------------------------------------------- |
 | header   | `protocol_header_t` | 8    | Protocol header (magic, version, length)      |
 | reserved | `uint8_t[16]`       | 16   | Reserved for future use (MUST be zero-filled) |
@@ -214,15 +217,17 @@ typedef struct {
 **Connection Behavior**
 
 The daemon SHOULD:
+
 1. Establish a TCP connection to device_ip:handshake_port
-2. Send the handshake request immediately after connection
-3. Wait for the handshake response
-4. Close the connection after receiving the response (or handle error)
+1. Send the handshake request immediately after connection
+1. Wait for the handshake response
+1. Close the connection after receiving the response (or handle error)
 
 **Timeout Handling**
+
 1. TCP connection timeout: 3 seconds
-2. Response timeout: 5 seconds
-3. On timeout: close connection and retry with exponential backoff
+1. Response timeout: 5 seconds
+1. On timeout: close connection and retry with exponential backoff
 
 ### Handshake Response (`handshake_response_t`)
 
@@ -246,17 +251,19 @@ RTP communication.
 **Parameter Negotiation**
 
 Currently, the protocol uses server-driven negotiation, meaning:
+
 1. The device determines the audio parameters (sample rate, channels, bit width)
-2. The client MUST use the parameters provided in the response
-3. Future versions may add client-side negotiation via the reserved fields
+1. The client MUST use the parameters provided in the response
+1. Future versions may add client-side negotiation via the reserved fields
 
 **Post-Handshake Actions**
 
 After receiving the handshake response, the client MUST:
+
 1. Open UDP socket on rtp_port to receive audio
-2. Establish TCP connection to commands_port for command exchange
-3. Store audio parameters for decoding RTP payloads
-4. Maintain both connections for the duration of the session
+1. Establish TCP connection to commands_port for command exchange
+1. Store audio parameters for decoding RTP payloads
+1. Maintain both connections for the duration of the session
 
 ```c
 /**
@@ -284,11 +291,10 @@ typedef struct {
 } __attribute__((packed)) handshake_response_t;
 ```
 
-
 ## 2.5. Command Exchange
 
-The Command Exchange phase enables the desktop daemon to control the edge device and query its status.
-All commands are sent over a persistent TCP connection.
+The Command Exchange phase enables the desktop daemon to control the edge device and query its
+status. All commands are sent over a persistent TCP connection.
 
 **Transport:** TCP
 
@@ -302,33 +308,35 @@ the session and reuse it for multiple commands.
 **Sequence Numbers**
 
 Each command request includes a monotonic sequence number:
+
 1. The client increments the sequence number for each new command
-2. The device echoes the sequence number in the response
-3. This allows the client to match responses with requests
-4. Sequence numbers start at 0 and wrap around at 65535
+1. The device echoes the sequence number in the response
+1. This allows the client to match responses with requests
+1. Sequence numbers start at 0 and wrap around at 65535
 
 **Timestamps**
 
 Each command includes a timestamp field:
+
 1. The client sets this to the current time in milliseconds since Unix epoch
-2. The device echoes the timestamp in the response
-3. This helps correlate requests and responses
-4. Useful for latency measurement and debugging
+1. The device echoes the timestamp in the response
+1. This helps correlate requests and responses
+1. Useful for latency measurement and debugging
 
 ### Command Types (`command_request_type_t`)
 
 | Command                | Value  | Description                            |
 | :--------------------- | :----- | :------------------------------------- |
-| System Commands                                                         ||
+| System Commands        |        |                                        |
 | `CMD_NOP`              | `0x00` | No operation (test connectivity)       |
 | `CMD_PING`             | `0x01` | Ping request (expects CMD_OK response) |
 | `CMD_DISCONNECT`       | `0x02` | Gracefully terminate the session       |
 | `CMD_GET_STATUS`       | `0x03` | Request full device status             |
 | `CMD_RESTART`          | `0x04` | Restart the device                     |
-| Audio Control                                                           ||
+| Audio Control          |        |                                        |
 | `CMD_VOLUME_SET`       | `0x20` | Set volume level (0-100)               |
 | `CMD_VOLUME_GET`       | `0x21` | Get current volume level               |
-| Device Info                                                             ||
+| Device Info            |        |                                        |
 | `CMD_BATTERY_GET`      | `0x40` | Get battery level (0-100%)             |
 | `CMD_FIRMWARE_VERSION` | `0x41` | Get firmware API version (uint16_t)    |
 
@@ -356,11 +364,11 @@ typedef enum {
 
 ### Response Codes (`command_response_type_t`)
 
-| Code                   | Value  | Description                            |
-| :--------------------- | :----- | :------------------------------------- |
-| `CMD_OK`               | `0x00` | Command executed successfully          |
-| `CMD_ERROR_UNKNOWN`    | `0x01` | Unknown or unsupported command         |
-| `CMD_INVALID`          | `0x02` | Invalid parameters                     |
+| Code                | Value  | Description                    |
+| :------------------ | :----- | :----------------------------- |
+| `CMD_OK`            | `0x00` | Command executed successfully  |
+| `CMD_ERROR_UNKNOWN` | `0x01` | Unknown or unsupported command |
+| `CMD_INVALID`       | `0x02` | Invalid parameters             |
 
 ```c
 /**
@@ -383,7 +391,7 @@ typedef enum {
 | `sequence`     | `uint16_t`          | 2    | Monotonic sequence number, incremented per command       |
 | `payload`      | `union`             | 64   | Command-specific payload (see below)                     |
 | `reserved`     | `uint8_t[17]`       | 17   | Reserved for future use (MUST be zero-filled)            |
-| Payload Union                                                                                         ||
+| Payload Union  |                     |      |                                                          |
 | `volume_level` | `uint8_t`           | 1    | CMD_VOLUME_SET (0-100)                                   |
 | `raw`          | `uint8_t[64]`       | 64   | Future commands (use with caution)                       |
 
@@ -421,7 +429,7 @@ typedef struct {
 | `sequence`      | `uint16_t`          | 2    | Echo of request sequence                      |
 | `payload`       | `union`             | 64   | Response payload (see below)                  |
 | `reserved`      | `uint8_t[16]`       | 16   | Reserved for future use (MUST be zero-filled) |
-| Payload Union                                                                               ||
+| Payload Union   |                     |      |                                               |
 | `volume_level`  | `uint8_t`           | 1    | CMD_VOLUME_SET or CMD_VOLUME_GET (0-100)      |
 | `battery_level` | `uint8_t`           | 1    | CMD_BATTERY_GET (0-100%)                      |
 | `version`       | `uint16_t`          | 2    | CMD_FIRMWARE_VERSION (e.g., 0x0100 = v1.0)    |
@@ -457,9 +465,10 @@ typedef struct {
 
 Audio is transmitted from the edge device to the desktop daemon using the Real-time Transport
 Protocol (RTP) as defined in RFC 3550. RTP provides:
+
 1. Sequencing — Detecting packet loss and reordering
-2. Timing — Synchronizing audio playback
-3. Payload identification — Supporting different audio codecs
+1. Timing — Synchronizing audio playback
+1. Payload identification — Supporting different audio codecs
 
 **Transport:** UDP
 
@@ -469,19 +478,19 @@ Protocol (RTP) as defined in RFC 3550. RTP provides:
 
 | Field               | Type       | Bits | Offset | Description                                                                            |
 | :------------------ | :--------- | :--- | :----- | :------------------------------------------------------------------------------------- |
-| Byte 0                                                                                                                                   ||
+| Byte 0              |            |      |        |                                                                                        |
 | `contributor_count` | `uint8_t`  | 4    | 0      | CSRC count. MUST be 0 for this protocol.                                               |
 | `ver`               | `uint8_t`  | 2    | 0      | RTP version. MUST be 2.                                                                |
 | `p`                 | `uint8_t`  | 1    | 0      | Padding flag. 0 = no padding.                                                          |
 | `x`                 | `uint8_t`  | 1    | 0      | Extension flag. 0 = no extension.                                                      |
-| Byte 1                                                                                                                                   ||
+| Byte 1              |            |      |        |                                                                                        |
 | `payload_types`     | `uint8_t`  | 7    | 1      | RTP payload type. Use 96-127 for dynamic payload types.                                |
 | `m`                 | `uint8_t`  | 1    | 1      | Marker bit. Set on the last packet of an audio frame.                                  |
-| Bytes 2-3                                                                                                                                ||
+| Bytes 2-3           |            |      |        |                                                                                        |
 | `sequence`          | `uint16_t` | 16   | 2      | Incrementing sequence number. Starts at a random value and increments by 1 per packet. |
-| Bytes 4-7                                                                                                                                ||
+| Bytes 4-7           |            |      |        |                                                                                        |
 | `timestamp`         | `uint32_t` | 32   | 4      | RTP timestamp. Increments based on sample rate.                                        |
-| Bytes 8-11                                                                                                                               ||
+| Bytes 8-11          |            |      |        |                                                                                        |
 | `ssrc`              | `uint32_t` | 32   | 8      | Synchronization source identifier. Unique per audio stream.                            |
 
 ```c
@@ -515,24 +524,27 @@ typedef struct {
 **Sequence Number Handling**
 
 The client SHOULD:
+
 1. Track the expected sequence number
-2. Detect and handle out-of-order packets
-3. Detect packet loss (missing sequence numbers)
-4. Use the sequence number for jitter buffer management
+1. Detect and handle out-of-order packets
+1. Detect packet loss (missing sequence numbers)
+1. Use the sequence number for jitter buffer management
 
 **Timestamp Handling**
 
 The RTP timestamp increments based on the sample rate: `timestamp_increment = (samples_per_frame)`
 
-For example, with 48kHz sample rate and 10ms frames: `timestamp_increment = 48000 * 0.010 = 480 samples`
+For example, with 48kHz sample rate and 10ms frames:
+`timestamp_increment = 48000 * 0.010 = 480 samples`
 
 **SSRC (Synchronization Source)**
 
 The SSRC:
+
 1. Uniquely identifies the audio stream
-2. Is randomly generated by the device at session start
-3. Remains constant for the duration of the session
-4. Allows multiple audio sources to be mixed
+1. Is randomly generated by the device at session start
+1. Remains constant for the duration of the session
+1. Allows multiple audio sources to be mixed
 
 Since the device will support one audio source, this field can be ignored.
 
@@ -543,7 +555,7 @@ The audio format is specified during the handshake phase:
 | Parameter  | Description                                                    |
 | :--------- | :------------------------------------------------------------- |
 | Encoding   | Raw PCM (no compression)                                       |
-| Sample     | Rate	As specified in `handshake_response_t::audio.sample_rate` |
+| Sample     | Rate As specified in `handshake_response_t::audio.sample_rate` |
 | Channels   | As specified in `handshake_response_t::audio.channels`         |
 | Bit Width  | As specified in `handshake_response_t::audio.bit_width`        |
 | Endianness | Little-endian                                                  |
@@ -551,25 +563,29 @@ The audio format is specified during the handshake phase:
 ### RTP Packet Size Calculation
 
 The total RTP packet size consists of the fixed header and the variable payload:
+
 ```
 packet_size = sizeof(rtp_header_t) + payload_size
 packet_size = 12 + payload_size
 ```
 
-The payload size depends on the audio parameters negotiated during handshake.
-Audio is typically transmitted in fixed-duration frames:
+The payload size depends on the audio parameters negotiated during handshake. Audio is typically
+transmitted in fixed-duration frames:
+
 ```
 payload_size = (sample_rate × frame_duration_ms × channels × bit_width) / (1000 × 8)
 packet_size = sizeof(rtp_header_t) + (sample_rate × frame_duration_ms × channels × bit_width) / (1000 × 8)
 ```
 
 Where:
+
 - `sample_rate` — Number of audio samples per second (in Hz)
 - `channels` — Number of audio channels (1, 2, or 4)
 - `bit_width` — Bits per sample (16, 24, or 32)
 - `frame_duration_ms` — Frame duration in milliseconds, we will use `frame_duration_ms=10`
 
 Example: 44.1 kHz, Stereo, 16-bit
+
 ```
 payload_size = (44100 × 10 × 2 × 16) / 8000 = 14112000 / 8000 = 1764 bytes
 packet_size = 12 + 1764 = 1776 bytes
@@ -578,4 +594,3 @@ packet_size = 12 + 1764 = 1776 bytes
 # Header example
 
 Use [device-protocol.h](./device-protocol.h) header file as reference.
-
